@@ -11,8 +11,8 @@ jobs:
     steps:
       - name: Ping database Supabase
         run: |
-          RESP=$(curl -fsS "${{ secrets.SUPABASE_URL }}/rest/v1/profil_sekolah?select=id&limit=1" \
+          curl -fsS "${{ secrets.SUPABASE_URL }}/rest/v1/profil_sekolah?select=id&limit=1" \
             -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}")
-          echo "Respon: $RESP"
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
+          echo ""
           echo "OK: Supabase aktif $(date)"
