@@ -1344,12 +1344,17 @@ async function formTransaksi(id){
     </table></div>
 
     <div class="row">
-      <div class="col-md-4 mb-2"><label class="form-label small">Tgl Nota</label><input type="date" class="form-control form-control-sm" id="t-tgl_nota" value="${trx.tgl_nota||''}"></div>
-      <div class="col-md-4 mb-2"><label class="form-label small">Tgl Faktur</label><input type="date" class="form-control form-control-sm" id="t-tgl_faktur" value="${trx.tgl_faktur||''}"></div>
-      <div class="col-md-4 mb-2"><label class="form-label small">Tgl BA Pemeriksaan</label><input type="date" class="form-control form-control-sm" id="t-tgl_ba_periksa" value="${trx.tgl_ba_periksa||''}"></div>
-      <div class="col-md-4 mb-2"><label class="form-label small">Tgl BA Serah Terima</label><input type="date" class="form-control form-control-sm" id="t-tgl_ba_serah" value="${trx.tgl_ba_serah||''}"></div>
-      <div class="col-md-4 mb-2"><label class="form-label small">Tgl Kuitansi</label><input type="date" class="form-control form-control-sm" id="t-tgl_kuitansi" value="${trx.tgl_kuitansi||''}"></div>
-      <div class="col-md-4 mb-2"><label class="form-label small">Tgl Lunas</label><input type="date" class="form-control form-control-sm" id="t-tgl_lunas" value="${trx.tgl_lunas||''}"></div>
+      <div class="col-md-4 mb-2"><label class="form-label small">Tgl Nota Pesanan</label><input type="date" class="form-control form-control-sm" id="t-tgl_nota" value="${trx.tgl_nota||''}"></div>
+    </div>
+    <div class="d-flex align-items-end gap-2 flex-wrap mb-2 p-2 rounded" style="background:var(--chip-bg)">
+      <div style="min-width:200px"><label class="form-label small fw-semibold mb-1">Tgl Faktur <span class="text-muted">(jadi dasar)</span></label><input type="date" class="form-control form-control-sm" id="t-tgl_faktur" value="${trx.tgl_faktur||''}"></div>
+      <button type="button" class="btn btn-brand btn-sm" onclick="samakanTanggal()"><i class="bi bi-arrow-down-up me-1"></i>Samakan 4 tanggal di bawah</button>
+    </div>
+    <div class="row">
+      <div class="col-md-4 mb-2"><label class="form-label small">Tgl BA Pemeriksaan</label><input type="date" class="form-control form-control-sm t-ikut" id="t-tgl_ba_periksa" value="${trx.tgl_ba_periksa||''}"></div>
+      <div class="col-md-4 mb-2"><label class="form-label small">Tgl BA Serah Terima</label><input type="date" class="form-control form-control-sm t-ikut" id="t-tgl_ba_serah" value="${trx.tgl_ba_serah||''}"></div>
+      <div class="col-md-4 mb-2"><label class="form-label small">Tgl Kuitansi</label><input type="date" class="form-control form-control-sm t-ikut" id="t-tgl_kuitansi" value="${trx.tgl_kuitansi||''}"></div>
+      <div class="col-md-4 mb-2"><label class="form-label small">Tgl Lunas</label><input type="date" class="form-control form-control-sm t-ikut" id="t-tgl_lunas" value="${trx.tgl_lunas||''}"></div>
     </div>
     <div class="border rounded p-2 mb-1">
       <div class="fw-semibold small text-muted mb-1">Untuk Buku Kas Umum (BKU)</div>
@@ -1390,6 +1395,13 @@ function updateTotal(){
 }
 function tambahItem(){ TRX_ITEMS.push({barang:'',banyaknya:1,satuan:'Buah',harga_satuan:0}); drawItems(); }
 function hapusItem(i){ TRX_ITEMS.splice(i,1); if(!TRX_ITEMS.length) tambahItem(); else drawItems(); }
+
+function samakanTanggal(){
+  const dasar = document.getElementById('t-tgl_faktur').value;
+  if(!dasar){ toast('Isi Tgl Faktur dulu.','danger'); return; }
+  document.querySelectorAll('.t-ikut').forEach(i=> i.value = dasar);
+  toast('4 tanggal disamakan dengan Tgl Faktur.');
+}
 
 async function simpanTransaksi(id){
   const g=(x)=>document.getElementById('t-'+x).value;
