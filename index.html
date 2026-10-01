@@ -27,6 +27,12 @@
   .stat-card .icon{ width:46px; height:46px; border-radius:10px; display:grid; place-items:center; font-size:1.3rem; }
   .card{ border:1px solid #e6eaf0; border-radius:12px; }
   .table thead th{ background:#f0f3f7; color:#3a4a5e; font-weight:600; font-size:.82rem; border-bottom:2px solid #e3e8ef; }
+  /* cegah isi sel pendek terlipat ke bawah (tampilan layar) */
+  .table td.text-end, .table th.text-end,
+  .table td.ps-3,
+  .table td:has(> .btn),
+  .table .chip,
+  .table td a{ white-space:nowrap; }
   .btn-brand{ background:var(--brand); color:#fff; }
   .btn-brand:hover{ background:var(--brand-dark); color:#fff; }
   .chip{ background:var(--chip-bg); color:var(--chip-fg); font-size:.72rem; padding:.28rem .7rem; border-radius:20px; font-weight:500; }
@@ -439,7 +445,7 @@ RENDER.dashboard = function(){
       <tr><td class="ps-3">${pad3(t.no_urut)}</td>
       <td>${esc(t.uraian||'-')}</td>
       <td><span class="chip">${esc(t.kategori?.nama||'-')}</span></td>
-      <td>${esc(t.toko?.nama_toko||'-')}</td>
+      <td class="text-nowrap">${esc(t.toko?.nama_toko||'-')}</td>
       <td class="text-end pe-3 fw-semibold">${rp(byTrx[t.id]||0)}</td></tr>`).join('');
     document.getElementById('dashRows').innerHTML = rows || `<tr><td colspan="5" class="text-center text-muted py-4">Belum ada transaksi.</td></tr>`;
   });
@@ -483,7 +489,7 @@ RENDER.transaksi = function(){
         <td class="ps-3">${pad3(t.no_urut)}</td>
         <td>${esc(t.uraian||'-')}</td>
         <td><span class="chip">${esc(t.kategori?.nama||'-')}</span></td>
-        <td>${esc(t.toko?.nama_toko||'-')}</td>
+        <td class="text-nowrap">${esc(t.toko?.nama_toko||'-')}</td>
         <td class="text-end fw-semibold" id="nilai-${t.id}">…</td>
         <td class="text-center">
           <button class="btn btn-sm btn-outline-primary" onclick="pilihCetak(${t.id})" title="Cetak"><i class="bi bi-printer"></i></button>
@@ -802,11 +808,11 @@ RENDER.bku = async function(){
     if(r.tipe==='in'){ saldo += r.jumlah; totIn += r.jumlah; }
     else { saldo -= r.jumlah; totOut += r.jumlah; }
     return `<tr>
-      <td>${r.tipe==='in'? fmtTglShort(r.tanggal):''}</td>
+      <td class="text-nowrap">${r.tipe==='in'? fmtTglShort(r.tanggal):''}</td>
       <td>${r.tipe==='in'? esc(r.uraian||''):''}</td>
       <td class="text-center">${r.tipe==='in'? esc(r.no_bukti||''):''}</td>
       <td class="text-end">${r.tipe==='in'? num(r.jumlah):''}</td>
-      <td>${r.tipe==='out'? fmtTglShort(r.tanggal):''}</td>
+      <td class="text-nowrap">${r.tipe==='out'? fmtTglShort(r.tanggal):''}</td>
       <td>${r.tipe==='out'? esc(r.uraian||''):''}</td>
       <td class="text-center">${r.tipe==='out'? esc(r.no_bukti||''):''}</td>
       <td class="text-end">${r.tipe==='out'? num(r.jumlah):''}</td>
