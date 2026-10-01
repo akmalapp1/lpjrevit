@@ -30,6 +30,7 @@
   .btn-brand{ background:var(--brand); color:#fff; }
   .btn-brand:hover{ background:var(--brand-dark); color:#fff; }
   .chip{ background:var(--chip-bg); color:var(--chip-fg); font-size:.72rem; padding:.28rem .7rem; border-radius:20px; font-weight:500; }
+  .chip-btn{ font-size:.75rem; max-width:230px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } 
   .page{ display:none; }
   .page.active{ display:block; }
   .login-wrap{ min-height:100vh; display:grid; place-items:center; background:linear-gradient(135deg,var(--brand),var(--brand-dark)); }
@@ -180,7 +181,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
 const APP = {
   user: null, profile: null, sekolah: null,
-  cache: { kategori: [], pajak: [], toko: [], format: [], transaksi: [], penerimaan: [], penarikan: [], setor_pajak: [] }
+  cache: { kategori: [], pajak: [], toko: [], format: [], transaksi: [], penerimaan: [], penarikan: [], setor_pajak: [], frasa: [] }
 };
 const isAdmin = () => APP.profile?.role === 'admin';
 
@@ -263,7 +264,7 @@ async function doLogout(){
 }
 
 async function loadAll(){
-  const [sek, kat, paj, tok, fmt, trx, pen, tar, stp] = await Promise.all([
+  const [sek, kat, paj, tok, fmt, trx, pen, tar, stp, frs] = await Promise.all([
     sb.from('profil_sekolah').select('*').eq('id',1).single(),
     sb.from('kategori').select('*').order('urutan'),
     sb.from('tarif_pajak').select('*').order('id'),
@@ -273,6 +274,7 @@ async function loadAll(){
     sb.from('penerimaan').select('*').order('tanggal'),
     sb.from('penarikan').select('*').order('tanggal'),
     sb.from('setor_pajak').select('*').order('tanggal'),
+    sb.from('frasa_uraian').select('*').order('urutan').order('id'),
   ]);
   APP.sekolah = sek.data || {};
   APP.cache.kategori = kat.data || [];
@@ -283,6 +285,7 @@ async function loadAll(){
   APP.cache.penerimaan = pen.data || [];
   APP.cache.penarikan = tar.data || [];
   APP.cache.setor_pajak = stp.data || [];
+  APP.cache.frasa = frs.data || [];
 }
 
 function showApp(){
@@ -1312,8 +1315,17 @@ async function formTransaksi(id){
         <select class="form-select" id="t-kat">${optKat}</select></div>
       <div class="col-md-4 mb-3"><label class="form-label small fw-semibold">Toko / Rekanan</label>
         <select class="form-select" id="t-toko"><option value="">— tidak ada —</option>${optToko}</select></div>
-      <div class="col-12 mb-3"><label class="form-label small fw-semibold">Uraian / Tujuan Kegiatan</label>
-        <textarea class="form-control" id="t-uraian" rows="2">${esc(trx.uraian||'')}</textarea></div>
+      <div class="col-12 mb-3">
+        <div class="d-flex justify-content-between align-items-center">
+          <label class="form-label small fw-semibold mb-0">Uraian / Tujuan Kegiatan</label>
+          <button type="button" class="btn btn-sm btn-outline-secondary chip-btn" onclick="kelolaFrasa()"><i class="bi bi-gear me-1"></i>Kelola frasa</button>
+        </div>
+        <div id="panelFrasa" class="border rounded p-2 my-2 d-none"></div>
+        <div class="d-flex flex-wrap gap-1 my-2" id="chipFrasa"></div>
+        <div class="mb-1"><button type="button" class="btn btn-outline-success btn-sm chip-btn" onclick="isiBarangUraian()"><i class="bi bi-box-seam me-1"></i>Isi "berupa + barang" dari item</button></div>
+        <textarea class="form-control" id="t-uraian" rows="2" onfocus="this.dataset.fokus='1'">${esc(trx.uraian||'')}</textarea>
+        <small class="text-muted">Klik chip = sisip frasa di posisi kursor. Tombol hijau = sisip "berupa [daftar barang]" dari Rincian Item.</small>
+      </div>
     </div>
 
     <div class="border rounded p-2 mb-3">
@@ -1366,6 +1378,7 @@ async function formTransaksi(id){
 
   showModal((id?'Edit':'Tambah')+' Transaksi', body, ()=>simpanTransaksi(id), 'modal-xl');
   drawItems();
+  renderChipFrasa();
 }
 
 function drawItems(){
@@ -1403,6 +1416,79 @@ function samakanTanggal(){
   toast('4 tanggal disamakan dengan Tgl Faktur.');
 }
 
+/* ===== FRASA URAIAN ===== */
+const labelChip = t => { const k=(t||'').trim().split(/\s+/); return k.length>2? k.slice(0,2).join(' ')+' …' : k.join(' '); };
+
+function renderChipFrasa(){
+  const el=document.getElementById('chipFrasa'); if(!el) return;
+  el.innerHTML = (APP.cache.frasa||[]).map(f=>
+    `<button type="button" class="btn btn-outline-secondary btn-sm chip-btn" title="Sisip: ${esc(f.teks)}" onclick="sisipFrasa(${f.id})"><i class="bi bi-plus-circle me-1"></i>${esc(labelChip(f.teks))}</button>`
+  ).join('') || '<span class="text-muted small">Belum ada frasa. Klik "Kelola frasa".</span>';
+}
+
+function sisipUraian(teks){
+  const ta=document.getElementById('t-uraian'); if(!ta) return;
+  let s=ta.selectionStart, e=ta.selectionEnd;
+  if(ta.dataset.fokus!=='1'){ s=e=ta.value.length; } // belum pernah diklik -> sisip di akhir
+  ta.value=ta.value.slice(0,s)+teks+ta.value.slice(e);
+  const p=s+teks.length; ta.focus(); ta.setSelectionRange(p,p);
+}
+function sisipFrasa(id){
+  const f=(APP.cache.frasa||[]).find(x=>x.id===id);
+  if(f) sisipUraian(' '+f.teks+' ');
+}
+function isiBarangUraian(){
+  const a=TRX_ITEMS.map(i=>(i.barang||'').trim()).filter(Boolean);
+  if(!a.length){ toast('Isi Rincian Item dulu.','danger'); return; }
+  const bar = a.length===1? a[0] : a.slice(0,-1).join(', ')+' dan '+a[a.length-1];
+  sisipUraian(' berupa '+bar);
+}
+
+function kelolaFrasa(){
+  const p=document.getElementById('panelFrasa'); if(!p) return;
+  p.classList.toggle('d-none');
+  if(!p.classList.contains('d-none')) renderPanelFrasa();
+}
+function renderPanelFrasa(){
+  const p=document.getElementById('panelFrasa'); if(!p) return;
+  const list=(APP.cache.frasa||[]).map(f=>`
+    <div class="input-group input-group-sm mb-1">
+      <input class="form-control" id="fr-${f.id}" value="${esc(f.teks)}">
+      <button type="button" class="btn btn-outline-primary" onclick="simpanFrasa(${f.id})" title="Simpan"><i class="bi bi-check-lg"></i></button>
+      <button type="button" class="btn btn-outline-danger" onclick="hapusFrasa(${f.id})" title="Hapus"><i class="bi bi-trash"></i></button>
+    </div>`).join('') || '<div class="text-muted small mb-1">Belum ada frasa.</div>';
+  p.innerHTML = `<div class="fw-semibold small text-muted mb-1">Kelola Frasa Uraian</div>${list}
+    <div class="input-group input-group-sm mt-2">
+      <input class="form-control" id="fr-baru" placeholder="Tambah frasa baru...">
+      <button type="button" class="btn btn-brand" onclick="tambahFrasa()"><i class="bi bi-plus-lg"></i> Tambah</button>
+    </div>`;
+}
+async function muatFrasa(){
+  const {data}=await sb.from('frasa_uraian').select('*').order('urutan').order('id');
+  APP.cache.frasa=data||[];
+  renderChipFrasa(); renderPanelFrasa();
+}
+async function tambahFrasa(){
+  const v=document.getElementById('fr-baru').value.trim(); if(!v) return;
+  const urutan=(APP.cache.frasa||[]).reduce((m,f)=>Math.max(m,f.urutan||0),0)+1;
+  const {error}=await sb.from('frasa_uraian').insert({teks:v, urutan});
+  if(error){ toast('Gagal tambah: '+error.message,'danger'); return; }
+  await muatFrasa(); toast('Frasa ditambahkan.');
+}
+async function simpanFrasa(id){
+  const v=document.getElementById('fr-'+id).value.trim();
+  if(!v){ toast('Frasa tidak boleh kosong.','danger'); return; }
+  const {error}=await sb.from('frasa_uraian').update({teks:v}).eq('id',id);
+  if(error){ toast('Gagal simpan: '+error.message,'danger'); return; }
+  await muatFrasa(); toast('Frasa disimpan.');
+}
+async function hapusFrasa(id){
+  if(!confirm('Hapus frasa ini?')) return;
+  const {error}=await sb.from('frasa_uraian').delete().eq('id',id);
+  if(error){ toast('Gagal hapus: '+error.message,'danger'); return; }
+  await muatFrasa(); toast('Frasa dihapus.');
+}
+
 async function simpanTransaksi(id){
   const g=(x)=>document.getElementById('t-'+x).value;
   const total=TRX_ITEMS.reduce((a,b)=>a+(Number(b.banyaknya)||0)*(Number(b.harga_satuan)||0),0);
@@ -1413,7 +1499,7 @@ async function simpanTransaksi(id){
     no_urut:Number(g('no'))||1,
     kategori_id:Number(g('kat'))||null,
     toko_id:tokoId,
-    uraian:g('uraian').trim()||null,
+    uraian:g('uraian').replace(/ {2,}/g,' ').trim()||null,
     nama_pemeriksa:g('pemeriksa').trim()||null,
     jabatan_pemeriksa:g('jabpem').trim()||null,
     nama_penerima: tokoSel? (tokoSel.pimpinan||null) : null,
