@@ -137,12 +137,14 @@
       <li><a class="nav-link" data-page="bp_bank"><i class="bi bi-bank2 me-2"></i>Bantu Bank</a></li>
       <li><a class="nav-link" data-page="bp_tunai"><i class="bi bi-wallet2 me-2"></i>Bantu Kas Tunai</a></li>
       <li><a class="nav-link" data-page="bp_pajak"><i class="bi bi-percent me-2"></i>Bantu Pajak</a></li>
+      <li><a class="nav-link" data-page="realisasi"><i class="bi bi-bar-chart-line me-2"></i>Realisasi RAB</a></li>
     </ul>
     <div class="nav-heading">Master Data</div>
     <ul class="nav flex-column">
       <li><a class="nav-link" data-page="toko"><i class="bi bi-shop me-2"></i>Data Toko</a></li>
       <li><a class="nav-link" data-page="kategori"><i class="bi bi-tags me-2"></i>Kategori</a></li>
       <li><a class="nav-link" data-page="pajak"><i class="bi bi-percent me-2"></i>Tarif Pajak</a></li>
+      <li><a class="nav-link" data-page="rab"><i class="bi bi-clipboard-data me-2"></i>Pekerjaan RAB</a></li>
     </ul>
     <div class="nav-heading">Pengaturan</div>
     <ul class="nav flex-column">
@@ -187,7 +189,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
 const APP = {
   user: null, profile: null, sekolah: null,
-  cache: { kategori: [], pajak: [], toko: [], format: [], transaksi: [], penerimaan: [], penarikan: [], setor_pajak: [], frasa: [] }
+  cache: { kategori: [], pajak: [], toko: [], format: [], transaksi: [], penerimaan: [], penarikan: [], setor_pajak: [], frasa: [], rab: [] }
 };
 const isAdmin = () => APP.profile?.role === 'admin';
 
@@ -270,7 +272,7 @@ async function doLogout(){
 }
 
 async function loadAll(){
-  const [sek, kat, paj, tok, fmt, trx, pen, tar, stp, frs] = await Promise.all([
+  const [sek, kat, paj, tok, fmt, trx, pen, tar, stp, frs, rabq] = await Promise.all([
     sb.from('profil_sekolah').select('*').eq('id',1).single(),
     sb.from('kategori').select('*').order('urutan'),
     sb.from('tarif_pajak').select('*').order('id'),
@@ -281,6 +283,7 @@ async function loadAll(){
     sb.from('penarikan').select('*').order('tanggal'),
     sb.from('setor_pajak').select('*').order('tanggal'),
     sb.from('frasa_uraian').select('*').order('urutan').order('id'),
+    sb.from('rab_pekerjaan').select('*').order('urutan').order('id'),
   ]);
   APP.sekolah = sek.data || {};
   APP.cache.kategori = kat.data || [];
@@ -292,6 +295,7 @@ async function loadAll(){
   APP.cache.penarikan = tar.data || [];
   APP.cache.setor_pajak = stp.data || [];
   APP.cache.frasa = frs.data || [];
+  APP.cache.rab = rabq.data || [];
 }
 
 function showApp(){
@@ -309,7 +313,7 @@ function showApp(){
 }
 
 function applyRoleUI(){
-  const nonAdminMenus = ['dashboard','transaksi','bku','bp_bank','bp_tunai','bp_pajak'];
+  const nonAdminMenus = ['dashboard','transaksi','bku','bp_bank','bp_tunai','bp_pajak','realisasi'];
   $$('.sidebar .nav-link').forEach(a=>{
     const p = a.dataset.page;
     if(!isAdmin() && !nonAdminMenus.includes(p)) a.parentElement.style.display='none';
@@ -409,6 +413,8 @@ function buildPages(){
     <div id="page-profil" class="page"></div>
     <div id="page-format" class="page"></div>
     <div id="page-tema" class="page"></div>
+    <div id="page-realisasi" class="page"></div>
+    <div id="page-rab" class="page"></div>
   `;
 }
 
@@ -425,6 +431,7 @@ RENDER.dashboard = function(){
       ${statCard('Total Nilai', '<span id="dashNilai">…</span>', 'bi-cash-stack', 'success')}
       ${statCard('Total Pajak', rp(totalPajak), 'bi-percent', 'warning')}
     </div>
+    <div id="dashRab"></div>
     <div class="card">
       <div class="card-header bg-white fw-bold py-3"><i class="bi bi-clock-history me-2"></i>Transaksi Terbaru</div>
       <div class="table-responsive">
@@ -449,6 +456,7 @@ RENDER.dashboard = function(){
       <td class="text-end pe-3 fw-semibold">${rp(byTrx[t.id]||0)}</td></tr>`).join('');
     document.getElementById('dashRows').innerHTML = rows || `<tr><td colspan="5" class="text-center text-muted py-4">Belum ada transaksi.</td></tr>`;
   });
+  renderDashRab();
 };
 function statCard(label, val, icon, color){
   return `<div class="col-md-3"><div class="card stat-card p-3"><div class="d-flex justify-content-between">
@@ -1041,9 +1049,9 @@ function masterPage(cfg){
     </div>
     <div class="card"><div class="table-responsive">
       <table class="table table-hover align-middle mb-0">
-        <thead><tr>${cfg.cols.map(c=>`<th>${c.label}</th>`).join('')}${isAdmin()?'<th class="text-center">Aksi</th>':''}</tr></thead>
+        <thead><tr>${cfg.cols.map(c=>`<th${c.type==='money'?' class="text-end"':''}>${c.label}</th>`).join('')}${isAdmin()?'<th class="text-center">Aksi</th>':''}</tr></thead>
         <tbody>${rows.length? rows.map(r=>`<tr>
-          ${cfg.cols.map(c=>`<td>${fmtCell(r[c.key], c.type)}</td>`).join('')}
+          ${cfg.cols.map(c=>`<td${c.type==='money'?' class="text-end"':''}>${fmtCell(r[c.key], c.type)}</td>`).join('')}
           ${isAdmin()? `<td class="text-center">
             <button class="btn btn-sm btn-outline-secondary" onclick='masterForm("${cfg.page}",${r.id})'><i class="bi bi-pencil"></i></button>
             <button class="btn btn-sm btn-outline-danger" onclick='masterDelete("${cfg.page}",${r.id})'><i class="bi bi-trash"></i></button>
@@ -1082,10 +1090,14 @@ const MASTER_CFG = {
       {key:'dok_kuitansi_upah',label:'Kuitansi Upah/Honor',type:'checkbox'},
       {key:'aktif',label:'Aktif',type:'checkbox',def:true},
     ] },
+  rab: { title:'Pekerjaan RAB', page:'rab', table:'rab_pekerjaan', cacheKey:'rab',
+    cols:[{key:'urutan',label:'Urutan'},{key:'nama',label:'Nama Pekerjaan'},{key:'pagu',label:'Pagu RAB',type:'money'}],
+    fields:[{key:'nama',label:'Nama Pekerjaan',req:true},{key:'pagu',label:'Pagu RAB (Rp)',type:'number'},{key:'urutan',label:'Urutan tampil',type:'number'}] },
 };
 RENDER.toko     = ()=>masterPage(MASTER_CFG.toko);
 RENDER.pajak    = ()=>masterPage(MASTER_CFG.pajak);
 RENDER.kategori = ()=>masterPage(MASTER_CFG.kategori);
+RENDER.rab      = ()=>masterPage(MASTER_CFG.rab);
 
 function masterForm(page, id){
   const cfg = MASTER_CFG[page];
@@ -1307,7 +1319,8 @@ async function formTransaksi(id){
     const {data}=await sb.from('transaksi_item').select('*').eq('transaksi_id',id).order('urutan');
     items=data||[];
   }
-  TRX_ITEMS = items.length? items.map(i=>({barang:i.barang,banyaknya:i.banyaknya,satuan:i.satuan,harga_satuan:i.harga_satuan})) : [{barang:'',banyaknya:1,satuan:'Buah',harga_satuan:0}];
+  TRX_ITEMS = items.length? items.map(i=>({barang:i.barang,banyaknya:i.banyaknya,satuan:i.satuan,harga_satuan:i.harga_satuan,pekerjaan_id:i.pekerjaan_id??null})) : [{barang:'',banyaknya:1,satuan:'Buah',harga_satuan:0,pekerjaan_id:null}];
+  TRX_REAL_LAIN = null;
 
   const optKat = APP.cache.kategori.filter(k=>k.aktif).map(k=>`<option value="${k.id}" ${trx.kategori_id===k.id?'selected':''}>${esc(k.nama)}</option>`).join('');
   const optToko= APP.cache.toko.map(t=>`<option value="${t.id}" ${trx.toko_id===t.id?'selected':''}>${esc(t.nama_toko)}</option>`).join('');
@@ -1351,15 +1364,20 @@ async function formTransaksi(id){
       </div>
     </div>
 
-    <div class="d-flex justify-content-between align-items-center mb-1">
+    <div class="d-flex justify-content-between align-items-end flex-wrap gap-2 mb-1">
       <div class="fw-semibold small">Rincian Item</div>
-      <button type="button" class="btn btn-sm btn-outline-primary" onclick="tambahItem()"><i class="bi bi-plus"></i> Item</button>
+      <div class="d-flex align-items-center gap-1 flex-wrap">
+        <select class="form-select form-select-sm" id="t-pek-semua" style="max-width:260px"><option value="">Pekerjaan RAB untuk semua item…</option>${optPekerjaan(null)}</select>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="terapkanPekerjaanSemua()"><i class="bi bi-arrow-down-square me-1"></i>Terapkan ke semua item</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="tambahItem()"><i class="bi bi-plus"></i> Item</button>
+      </div>
     </div>
     <div class="table-responsive"><table class="table table-sm align-middle">
-      <thead><tr><th style="width:34%">Barang</th><th style="width:12%">Qty</th><th style="width:14%">Satuan</th><th style="width:18%">Harga</th><th style="width:18%">Jumlah</th><th></th></tr></thead>
+      <thead><tr><th style="width:25%">Barang</th><th style="width:9%">Qty</th><th style="width:10%">Satuan</th><th style="width:14%">Harga</th><th style="width:14%">Jumlah</th><th style="width:26%">Pekerjaan RAB</th><th></th></tr></thead>
       <tbody id="itemRows"></tbody>
-      <tfoot><tr><td colspan="4" class="text-end fw-bold">TOTAL</td><td class="fw-bold" id="itemTotal">Rp 0</td><td></td></tr></tfoot>
+      <tfoot><tr><td colspan="4" class="text-end fw-bold">TOTAL</td><td class="fw-bold" id="itemTotal">Rp 0</td><td colspan="2"></td></tr></tfoot>
     </table></div>
+    <div id="ringkasRab" class="mb-3"></div>
 
     <div class="row">
       <div class="col-md-4 mb-2"><label class="form-label small">Tgl Nota Pesanan</label><input type="date" class="form-control form-control-sm" id="t-tgl_nota" value="${trx.tgl_nota||''}"></div>
@@ -1385,6 +1403,10 @@ async function formTransaksi(id){
   showModal((id?'Edit':'Tambah')+' Transaksi', body, ()=>simpanTransaksi(id), 'modal-xl');
   drawItems();
   renderChipFrasa();
+  // realisasi pekerjaan lain (tanpa transaksi yang sedang diedit) untuk hitung sisa pagu
+  const real = await hitungRealisasi(id||null);
+  TRX_REAL_LAIN = real.ok? real.per : null;
+  renderRingkasRab();
 }
 
 function drawItems(){
@@ -1395,9 +1417,17 @@ function drawItems(){
       <td><input type="number" step="any" class="form-control form-control-sm" data-k="banyaknya" value="${it.banyaknya}"></td>
       <td><input class="form-control form-control-sm" data-k="satuan" value="${esc(it.satuan)}"></td>
       <td><input type="number" step="any" class="form-control form-control-sm" data-k="harga_satuan" value="${it.harga_satuan}"></td>
-      <td class="fw-semibold jml-cell">${rp((Number(it.banyaknya)||0)*(Number(it.harga_satuan)||0))}</td>
+      <td class="fw-semibold jml-cell text-nowrap">${rp((Number(it.banyaknya)||0)*(Number(it.harga_satuan)||0))}</td>
+      <td><select class="form-select form-select-sm" data-k="pekerjaan_id"><option value="">— pilih —</option>${optPekerjaan(it.pekerjaan_id)}</select></td>
       <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="hapusItem(${i})"><i class="bi bi-x"></i></button></td>
     </tr>`).join('');
+  tb.querySelectorAll('select[data-k="pekerjaan_id"]').forEach(sel=>{
+    sel.addEventListener('change', e=>{
+      const i=+e.target.closest('tr').dataset.i;
+      TRX_ITEMS[i].pekerjaan_id = e.target.value? Number(e.target.value) : null;
+      renderRingkasRab();
+    });
+  });
   tb.querySelectorAll('input').forEach(inp=>{
     inp.addEventListener('input', e=>{
       const tr=e.target.closest('tr'); const i=+tr.dataset.i; const k=e.target.dataset.k;
@@ -1411,8 +1441,13 @@ function drawItems(){
 function updateTotal(){
   const total=TRX_ITEMS.reduce((a,b)=>a+(Number(b.banyaknya)||0)*(Number(b.harga_satuan)||0),0);
   const el=document.getElementById('itemTotal'); if(el) el.textContent=rp(total);
+  renderRingkasRab();
 }
-function tambahItem(){ TRX_ITEMS.push({barang:'',banyaknya:1,satuan:'Buah',harga_satuan:0}); drawItems(); }
+function tambahItem(){
+  const last=TRX_ITEMS[TRX_ITEMS.length-1];
+  TRX_ITEMS.push({barang:'',banyaknya:1,satuan:'Buah',harga_satuan:0,pekerjaan_id:last? (last.pekerjaan_id??null) : null});
+  drawItems();
+}
 function hapusItem(i){ TRX_ITEMS.splice(i,1); if(!TRX_ITEMS.length) tambahItem(); else drawItems(); }
 
 function samakanTanggal(){
@@ -1495,6 +1530,165 @@ async function hapusFrasa(id){
   await muatFrasa(); toast('Frasa dihapus.');
 }
 
+/* ===== PEKERJAAN RAB ===== */
+let TRX_REAL_LAIN = null; // {pekerjaan_id: realisasi} dari transaksi lain (untuk sisa pagu di form)
+const pctTxt = (r,p) => (Number(p)? (r/Number(p)*100) : 0).toFixed(1).replace('.',',')+'%';
+
+function optPekerjaan(selId){
+  return (APP.cache.rab||[]).map(p=>`<option value="${p.id}" ${Number(selId)===Number(p.id)?'selected':''}>${esc(p.nama)}</option>`).join('');
+}
+
+// jumlah item per pekerjaan; excludeTrxId = abaikan item transaksi tsb (dipakai saat edit)
+async function hitungRealisasi(excludeTrxId){
+  const {data, error} = await sb.from('transaksi_item').select('transaksi_id, pekerjaan_id, jumlah');
+  if(error) return { ok:false, msg:error.message, per:{}, belum:0, total:0 };
+  const per={}; let belum=0, total=0;
+  const adaPek = new Set((APP.cache.rab||[]).map(p=>Number(p.id)));
+  (data||[]).forEach(i=>{
+    if(excludeTrxId && i.transaksi_id===excludeTrxId) return;
+    const n=Number(i.jumlah)||0; total+=n;
+    const k=Number(i.pekerjaan_id);
+    if(i.pekerjaan_id!=null && adaPek.has(k)) per[k]=(per[k]||0)+n; else belum+=n;
+  });
+  return { ok:true, per, belum, total };
+}
+
+function terapkanPekerjaanSemua(){
+  const v=document.getElementById('t-pek-semua').value;
+  if(!v){ toast('Pilih pekerjaan RAB dulu.','danger'); return; }
+  TRX_ITEMS.forEach(it=> it.pekerjaan_id=Number(v));
+  drawItems();
+  toast('Pekerjaan RAB diterapkan ke semua item.');
+}
+
+// ringkasan alokasi transaksi yang sedang diisi + sisa pagu
+function renderRingkasRab(){
+  const el=document.getElementById('ringkasRab'); if(!el) return;
+  const rab=APP.cache.rab||[];
+  if(!rab.length){ el.innerHTML='<div class="small text-muted"><i class="bi bi-info-circle me-1"></i>Belum ada data Pekerjaan RAB (menu Master Data → Pekerjaan RAB).</div>'; return; }
+  const per={}; let belum=0;
+  TRX_ITEMS.forEach(it=>{
+    if(!(it.barang||'').trim()) return;
+    const n=(Number(it.banyaknya)||0)*(Number(it.harga_satuan)||0);
+    if(it.pekerjaan_id) per[it.pekerjaan_id]=(per[it.pekerjaan_id]||0)+n; else belum+=n;
+  });
+  const baris = Object.keys(per).map(k=>{
+    const p=rab.find(x=>Number(x.id)===Number(k)); if(!p) return '';
+    const pagu=Number(p.pagu)||0, n=per[k];
+    if(!TRX_REAL_LAIN) return `<tr><td>${esc(p.nama)}</td><td class="text-end">${rp(n)}</td><td class="text-end text-muted" colspan="2">menghitung…</td></tr>`;
+    const terpakai=TRX_REAL_LAIN[k]||0, sisa=pagu-terpakai-n;
+    return `<tr class="${sisa<0?'table-danger':''}"><td>${esc(p.nama)}</td><td class="text-end">${rp(n)}</td><td class="text-end">${rp(pagu-terpakai)}</td>
+      <td class="text-end fw-semibold">${rp(sisa)}${sisa<0?' <i class="bi bi-exclamation-triangle text-danger" title="Melebihi pagu RAB"></i>':''}</td></tr>`;
+  }).join('');
+  const bBelum = belum? `<tr class="table-warning"><td><i>Belum dipilih pekerjaan</i></td><td class="text-end">${rp(belum)}</td><td colspan="2" class="small">Masuk "belum dialokasikan"</td></tr>` : '';
+  if(!baris && !bBelum){ el.innerHTML=''; return; }
+  const lebih = TRX_REAL_LAIN && Object.keys(per).some(k=>{ const p=rab.find(x=>Number(x.id)===Number(k)); return p && (Number(p.pagu)||0)-(TRX_REAL_LAIN[k]||0)-per[k] < 0; });
+  el.innerHTML = `<div class="fw-semibold small mb-1">Alokasi Pekerjaan RAB transaksi ini</div>
+    <div class="table-responsive"><table class="table table-sm table-bordered align-middle mb-1" style="font-size:.85rem">
+      <thead><tr><th>Pekerjaan RAB</th><th class="text-end">Dari transaksi ini</th><th class="text-end">Sisa pagu saat ini</th><th class="text-end">Sisa setelah disimpan</th></tr></thead>
+      <tbody>${baris}${bBelum}</tbody></table></div>
+    ${lebih? '<div class="small text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Ada pekerjaan yang melebihi pagu RAB. Periksa kembali sebelum menyimpan (tetap bisa disimpan).</div>':''}`;
+}
+
+// kartu realisasi di Dashboard
+async function renderDashRab(){
+  const el=document.getElementById('dashRab'); if(!el) return;
+  const rab=APP.cache.rab||[];
+  if(!rab.length){ el.innerHTML=''; return; }
+  const r=await hitungRealisasi(null);
+  if(!document.getElementById('dashRab')) return;
+  if(!r.ok){ el.innerHTML=`<div class="alert alert-warning small">Realisasi RAB belum bisa dihitung: ${esc(r.msg)}</div>`; return; }
+  const totPagu=rab.reduce((a,p)=>a+(Number(p.pagu)||0),0);
+  const bars=rab.map(p=>{
+    const pagu=Number(p.pagu)||0, real=r.per[p.id]||0, x=pagu? real/pagu*100 : 0, over=real>pagu;
+    const warna= over? 'bg-danger' : x>=90? 'bg-warning' : 'bg-success';
+    return `<div class="mb-3">
+      <div class="d-flex justify-content-between flex-wrap gap-1 small mb-1">
+        <span class="fw-semibold">${esc(p.nama)} ${over?'<span class="badge text-bg-danger ms-1">Melebihi pagu</span>':''}</span>
+        <span class="text-nowrap">${rp(real)} / ${rp(pagu)} &nbsp;<b>${pctTxt(real,pagu)}</b></span>
+      </div>
+      <div class="progress" style="height:8px"><div class="progress-bar ${warna}" style="width:${Math.min(x,100)}%"></div></div>
+      <div class="small ${over?'text-danger':'text-muted'}" style="font-size:.78rem">${over? 'Lebih '+rp(real-pagu) : 'Sisa '+rp(pagu-real)}</div>
+    </div>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="row g-3 mb-3">
+      ${statCard('Total Pagu RAB', rp(totPagu), 'bi-clipboard-data', 'primary')}
+      ${statCard('Realisasi', rp(r.total), 'bi-graph-up', 'success')}
+      ${statCard('Sisa Anggaran', rp(totPagu-r.total), 'bi-piggy-bank', 'info')}
+      ${statCard('Serapan', pctTxt(r.total,totPagu), 'bi-speedometer2', 'secondary')}
+    </div>
+    <div class="card mb-4">
+      <div class="card-header bg-white fw-bold py-3"><i class="bi bi-bar-chart-line me-2"></i>Realisasi per Pekerjaan RAB</div>
+      <div class="card-body">${bars}
+        ${r.belum? `<div class="alert alert-warning small py-2 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>${rp(r.belum)} item transaksi <b>belum dipilihkan pekerjaan RAB</b>. Buka transaksinya lalu isi kolom Pekerjaan RAB di Rincian Item.</div>`:''}
+      </div>
+    </div>`;
+}
+
+// halaman Realisasi RAB
+RENDER.realisasi = async function(){
+  const el=document.getElementById('page-realisasi');
+  el.innerHTML='<h5 class="fw-bold mb-3">Realisasi RAB</h5><div class="text-muted">Memuat…</div>';
+  const rab=APP.cache.rab||[];
+  const r=await hitungRealisasi(null);
+  if(!r.ok){ el.innerHTML=`<h5 class="fw-bold mb-3">Realisasi RAB</h5><div class="alert alert-warning small">Belum bisa dihitung: ${esc(r.msg)}</div>`; return; }
+  const totPagu=rab.reduce((a,p)=>a+(Number(p.pagu)||0),0);
+  const body=rab.map((p,i)=>{
+    const pagu=Number(p.pagu)||0, real=r.per[p.id]||0, over=real>pagu;
+    return `<tr class="${over?'table-danger':''}"><td class="ps-3">${i+1}</td><td>${esc(p.nama)}</td>
+      <td class="text-end">${num(pagu)}</td><td class="text-end">${num(real)}</td><td class="text-end">${num(pagu-real)}</td><td class="text-end">${pctTxt(real,pagu)}</td></tr>`;
+  }).join('');
+  el.innerHTML=`
+    <div class="d-flex justify-content-between align-items-center mb-3 no-print">
+      <h5 class="fw-bold mb-0">Realisasi RAB</h5>
+      <button class="btn btn-brand btn-sm" onclick="cetakRealisasi()"><i class="bi bi-printer me-1"></i>Cetak Laporan</button>
+    </div>
+    <div class="card"><div class="table-responsive">
+      <table class="table table-bordered table-sm align-middle mb-0">
+        <thead class="text-center"><tr><th>No</th><th>Uraian Pekerjaan</th><th>Pagu RAB (Rp)</th><th>Realisasi (Rp)</th><th>Sisa (Rp)</th><th>%</th></tr></thead>
+        <tbody>${rab.length? body : '<tr><td colspan="6" class="text-center text-muted py-4">Belum ada data Pekerjaan RAB.</td></tr>'}
+          ${r.belum? `<tr><td></td><td><i>Belum dialokasikan</i></td><td></td><td class="text-end">${num(r.belum)}</td><td></td><td></td></tr>`:''}
+          <tr class="fw-bold"><td></td><td class="text-end">JUMLAH</td><td class="text-end">${num(totPagu)}</td><td class="text-end">${num(r.total)}</td><td class="text-end">${num(totPagu-r.total)}</td><td class="text-end">${pctTxt(r.total,totPagu)}</td></tr>
+        </tbody>
+      </table>
+    </div></div>
+    <div class="small text-muted mt-2">Realisasi = jumlah Rincian Item transaksi per Pekerjaan RAB.</div>`;
+};
+
+async function cetakRealisasi(){
+  const s=APP.sekolah||{};
+  const rab=APP.cache.rab||[];
+  const r=await hitungRealisasi(null);
+  if(!r.ok){ toast('Gagal hitung realisasi: '+r.msg,'danger'); return; }
+  const totPagu=rab.reduce((a,p)=>a+(Number(p.pagu)||0),0);
+  const d=new Date(); const hariIni=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const body=rab.map((p,i)=>{
+    const pagu=Number(p.pagu)||0, real=r.per[p.id]||0;
+    return `<tr><td style="text-align:center">${i+1}</td><td>${esc(p.nama)}</td><td style="text-align:right">${num(pagu)}</td>
+      <td style="text-align:right">${num(real)}</td><td style="text-align:right">${num(pagu-real)}</td><td style="text-align:center">${pctTxt(real,pagu)}</td></tr>`;
+  }).join('');
+  const html=`
+  <div class="doc">${kop(s)}
+    <h3>LAPORAN REALISASI PENGGUNAAN DANA</h3>
+    <div style="text-align:center">Bantuan Pemerintah Program Revitalisasi SMK Tahun Anggaran ${esc(s.tahun_anggaran||'')}</div>
+    <table class="items" style="font-size:10.5pt">
+      <thead><tr><th style="width:5%">No</th><th>Uraian Pekerjaan</th><th style="width:17%">Pagu RAB (Rp)</th><th style="width:17%">Realisasi (Rp)</th><th style="width:17%">Sisa (Rp)</th><th style="width:9%">%</th></tr></thead>
+      <tbody>${body}
+        ${r.belum? `<tr><td></td><td><i>Belum dialokasikan</i></td><td></td><td style="text-align:right">${num(r.belum)}</td><td></td><td></td></tr>`:''}
+        <tr style="font-weight:bold"><td></td><td style="text-align:right">JUMLAH</td><td style="text-align:right">${num(totPagu)}</td><td style="text-align:right">${num(r.total)}</td><td style="text-align:right">${num(totPagu-r.total)}</td><td style="text-align:center">${pctTxt(r.total,totPagu)}</td></tr>
+      </tbody>
+    </table>
+    <table style="width:100%;margin-top:24px"><tr>
+      <td style="width:50%;text-align:left;vertical-align:top">Mengetahui<br>Kepala ${esc(s.nama_sekolah||'')}<div style="height:60px"></div><span class="nm">${esc(s.kepsek||'')}</span><br>NIP. ${esc(s.nip_kepsek||'')}</td>
+      <td style="width:50%;text-align:left;vertical-align:top">${esc(s.kota_ttd||'Benteng')}, ${fmtTgl(hariIni)}<br>Bendahara P2SP ${esc(s.nama_sekolah||'')}<div style="height:60px"></div><span class="nm">${esc(s.bendahara||'')}</span><br>NIP. ${esc(s.nip_bendahara||'')}</td>
+    </tr></table>
+  </div>`;
+  document.getElementById('printArea').innerHTML=html;
+  document.body.classList.remove('print-bku'); // potret
+  setTimeout(()=>window.print(), 300);
+}
+
 async function simpanTransaksi(id){
   const g=(x)=>document.getElementById('t-'+x).value;
   const total=TRX_ITEMS.reduce((a,b)=>a+(Number(b.banyaknya)||0)*(Number(b.harga_satuan)||0),0);
@@ -1520,19 +1714,29 @@ async function simpanTransaksi(id){
   const clean=TRX_ITEMS.filter(i=>i.barang.trim());
   if(!clean.length){ toast('Minimal 1 item dengan nama barang.','danger'); return false; }
 
-  let trxId=id;
+  let trxId=id, oldIds=null;
   if(id){
     const {error}=await sb.from('transaksi').update(header).eq('id',id);
     if(error){ toast('Gagal: '+error.message,'danger'); return false; }
-    await sb.from('transaksi_item').delete().eq('transaksi_id',id);
+    // catat id item lama; dihapus SETELAH item baru berhasil disimpan (agar item tidak hilang bila simpan gagal)
+    const {data:lama, error:eLama}=await sb.from('transaksi_item').select('id').eq('transaksi_id',id);
+    if(eLama){ await sb.from('transaksi_item').delete().eq('transaksi_id',id); } // cadangan: cara lama
+    else oldIds=(lama||[]).map(r=>r.id);
   }else{
     const {data,error}=await sb.from('transaksi').insert(header).select().single();
     if(error){ toast('Gagal: '+error.message,'danger'); return false; }
     trxId=data.id;
   }
-  const rows=clean.map((it,idx)=>({transaksi_id:trxId,barang:it.barang.trim(),banyaknya:Number(it.banyaknya)||0,satuan:it.satuan||'Buah',harga_satuan:Number(it.harga_satuan)||0,urutan:idx}));
+  const rows=clean.map((it,idx)=>({transaksi_id:trxId,barang:it.barang.trim(),banyaknya:Number(it.banyaknya)||0,satuan:it.satuan||'Buah',harga_satuan:Number(it.harga_satuan)||0,urutan:idx,pekerjaan_id:it.pekerjaan_id? Number(it.pekerjaan_id) : null}));
   const {error:e2}=await sb.from('transaksi_item').insert(rows);
-  if(e2){ toast('Item gagal: '+e2.message,'danger'); return false; }
+  if(e2){
+    const pesan = /pekerjaan_id/.test(e2.message)? ' (kolom pekerjaan_id belum ada: jalankan SQL Pekerjaan RAB dulu)' : '';
+    toast('Item gagal disimpan: '+e2.message+pesan+(oldIds?' — item lama tetap utuh.':''),'danger'); return false;
+  }
+  if(oldIds && oldIds.length){
+    const {error:e3}=await sb.from('transaksi_item').delete().in('id', oldIds);
+    if(e3) toast('Item baru tersimpan, tetapi item lama gagal dihapus: '+e3.message,'danger');
+  }
   await loadAll(); RENDER.transaksi(); toast('Transaksi disimpan.'); return true;
 }
 
