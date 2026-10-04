@@ -494,7 +494,7 @@ RENDER.transaksi = function(){
     );
     document.getElementById('trxRows').innerHTML = rows.length? rows.map(t=>`
       <tr>
-        <td class="ps-3">${pad3(t.no_urut)}</td>
+        <td class="ps-3">${pad3(t.no_urut)}<span id="warn-${t.id}"></span></td>
         <td>${esc(t.uraian||'-')}</td>
         <td><span class="chip">${esc(t.kategori?.nama||'-')}</span></td>
         <td class="text-nowrap">${esc(t.toko?.nama_toko||'-')}</td>
@@ -505,9 +505,17 @@ RENDER.transaksi = function(){
           <button class="btn btn-sm btn-outline-danger" onclick="hapusTransaksi(${t.id})" title="Hapus"><i class="bi bi-trash"></i></button>`:''}
         </td>
       </tr>`).join('') : `<tr><td colspan="6" class="text-center text-muted py-4">Tidak ada data.</td></tr>`;
-    rows.forEach(t=> sb.from('transaksi_item').select('jumlah').eq('transaksi_id',t.id).then(({data})=>{
-      const s=(data||[]).reduce((a,b)=>a+(Number(b.jumlah)||0),0);
+    const idPek = new Set((APP.cache.rab||[]).map(p=>Number(p.id)));
+    rows.forEach(t=> sb.from('transaksi_item').select('*').eq('transaksi_id',t.id).then(({data})=>{
+      const items=data||[];
+      const s=items.reduce((a,b)=>a+(Number(b.jumlah)||0),0);
       const c=document.getElementById('nilai-'+t.id); if(c) c.textContent=rp(s);
+      // badge: ada item yang belum dipetakan ke Pekerjaan RAB
+      if(idPek.size){
+        const kosong=items.filter(i=> i.pekerjaan_id==null || !idPek.has(Number(i.pekerjaan_id))).length;
+        const w=document.getElementById('warn-'+t.id);
+        if(w) w.innerHTML = kosong? ` <span class="badge text-bg-danger" title="${kosong} dari ${items.length} item belum dipetakan ke Pekerjaan RAB"><i class="bi bi-exclamation-triangle"></i></span>` : '';
+      }
     }));
   };
   draw();
