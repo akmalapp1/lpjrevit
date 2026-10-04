@@ -542,7 +542,7 @@ RENDER.transaksi = function(){
       const c=document.getElementById('nilai-'+t.id); if(c) c.textContent=rp(s);
       // badge: ada item yang belum dipetakan ke Pekerjaan RAB
       if(idPek.size){
-        const kosong=items.filter(i=> i.pekerjaan_id==null || !idPek.has(Number(i.pekerjaan_id))).length;
+        const kosong=items.filter(i=> !i.alokasi_mode && (i.pekerjaan_id==null || !idPek.has(Number(i.pekerjaan_id)))).length;
         const w=document.getElementById('warn-'+t.id);
         if(w) w.innerHTML = kosong? ` <span class="badge text-bg-danger" title="${kosong} dari ${items.length} item belum dipetakan ke Pekerjaan RAB"><i class="bi bi-exclamation-triangle"></i></span>` : '';
       }
@@ -1380,7 +1380,12 @@ async function formTransaksi(id, salinDari){
     const {data}=await sb.from('transaksi_item').select('*').eq('transaksi_id',salinDari).order('urutan');
     items=data||[];
   }
-  TRX_ITEMS = items.length? items.map(i=>({barang:i.barang,banyaknya:i.banyaknya,satuan:i.satuan,harga_satuan:i.harga_satuan,pekerjaan_id:i.pekerjaan_id??null})) : [{barang:'',banyaknya:1,satuan:'Buah',harga_satuan:0,pekerjaan_id:null}];
+  const alokMap = await muatAlokasi(items);
+  TRX_ITEMS = items.length? items.map(i=>({barang:i.barang,banyaknya:i.banyaknya,satuan:i.satuan,harga_satuan:i.harga_satuan,
+      pekerjaan_id: alokMap[i.id]? null : (i.pekerjaan_id??null),
+      alok: alokMap[i.id]? { mode:i.alokasi_mode||'qty', baris:alokMap[i.id] } : null }))
+    : [{barang:'',banyaknya:1,satuan:'Buah',harga_satuan:0,pekerjaan_id:null,alok:null}];
+  TRX_SPLIT = null;
   TRX_REAL_LAIN = null;
 
   const optKat = APP.cache.kategori.filter(k=>k.aktif).map(k=>`<option value="${k.id}" ${trx.kategori_id===k.id?'selected':''}>${esc(k.nama)}</option>`).join('');
@@ -1391,7 +1396,7 @@ async function formTransaksi(id, salinDari){
   const body=`${infoSalin}
     <div class="row">
       <div class="col-md-3 mb-3"><label class="form-label small fw-semibold">No. Urut</label>
-        <input type="number" class="form-control" id="t-no" value="${trx.no_urut||nextNo}"></div>
+        <input type="number" class="form-control" id="t-no" value="${trx.no_urut||nextNo}" oninput="noUrutBerubah()"></div>
       <div class="col-md-5 mb-3"><label class="form-label small fw-semibold">Kategori</label>
         <select class="form-select" id="t-kat">${optKat}</select></div>
       <div class="col-md-4 mb-3"><label class="form-label small fw-semibold">Toko / Rekanan</label>
@@ -1457,7 +1462,13 @@ async function formTransaksi(id, salinDari){
     <div class="border rounded p-2 mb-1">
       <div class="fw-semibold small text-muted mb-1">Untuk Buku Kas Umum (BKU)</div>
       <div class="row">
-        <div class="col-md-4 mb-2"><label class="form-label small">No. Bukti (BKU)</label><input class="form-control form-control-sm" id="t-no_bukti" value="${esc(trx.no_bukti||'')}" placeholder="mis. 001"></div>
+        <div class="col-md-4 mb-2"><label class="form-label small">No. Bukti (BKU)</label>
+          <div class="input-group input-group-sm">
+            <input class="form-control" id="t-no_bukti" value="${esc(id? (trx.no_bukti||'') : pad3(trx.no_urut||nextNo))}" placeholder="${pad3(trx.no_urut||nextNo)}"
+              data-manual="${id?'1':''}" data-trx="${id||''}" oninput="this.dataset.manual='1';cekNoBukti()">
+            <button type="button" class="btn btn-outline-secondary" onclick="noBuktiIkutUrut()" title="Samakan dengan No. Urut (3 digit)">= No. Urut</button>
+          </div>
+          <div class="text-warning" id="t-nobukti-warn" style="font-size:.75rem"></div></div>
         <div class="col-md-8 mb-2"><label class="form-label small">Link Scan Bukti (Google Drive)</label><input class="form-control form-control-sm" id="t-link_bukti" value="${esc(trx.link_bukti||'')}" placeholder="https://drive.google.com/..."></div>
       </div>
     </div>`;
@@ -1465,6 +1476,7 @@ async function formTransaksi(id, salinDari){
   showModal(id? 'Edit Transaksi' : (src? 'Salin Transaksi' : 'Tambah Transaksi'), body, ()=>simpanTransaksi(id), 'modal-xl');
   drawItems();
   renderChipFrasa();
+  cekNoBukti();
   // realisasi pekerjaan lain (tanpa transaksi yang sedang diedit) untuk hitung sisa pagu
   const real = await hitungRealisasi(id||null);
   TRX_REAL_LAIN = real.ok? real.per : null;
@@ -1472,45 +1484,181 @@ async function formTransaksi(id, salinDari){
 }
 
 function drawItems(){
-  const tb=document.getElementById('itemRows');
+  const tb=document.getElementById('itemRows'); if(!tb) return;
   tb.innerHTML=TRX_ITEMS.map((it,i)=>`
     <tr data-i="${i}">
       <td><input class="form-control form-control-sm" data-k="barang" value="${esc(it.barang)}"></td>
       <td><input type="number" step="any" class="form-control form-control-sm" data-k="banyaknya" value="${it.banyaknya}"></td>
       <td><input class="form-control form-control-sm" data-k="satuan" value="${esc(it.satuan)}"></td>
       <td><input type="number" step="any" class="form-control form-control-sm" data-k="harga_satuan" value="${it.harga_satuan}"></td>
-      <td class="fw-semibold jml-cell text-nowrap">${rp((Number(it.banyaknya)||0)*(Number(it.harga_satuan)||0))}</td>
-      <td><select class="form-select form-select-sm" data-k="pekerjaan_id"><option value="">— pilih —</option>${optPekerjaan(it.pekerjaan_id)}</select></td>
+      <td class="fw-semibold jml-cell text-nowrap">${rp(jmlItem(it))}</td>
+      <td id="pek-cell-${i}">${selPekCell(it,i)}</td>
       <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="hapusItem(${i})"><i class="bi bi-x"></i></button></td>
-    </tr>`).join('');
-  tb.querySelectorAll('select[data-k="pekerjaan_id"]').forEach(sel=>{
-    sel.addEventListener('change', e=>{
-      const i=+e.target.closest('tr').dataset.i;
-      TRX_ITEMS[i].pekerjaan_id = e.target.value? Number(e.target.value) : null;
-      renderRingkasRab();
-    });
-  });
-  tb.querySelectorAll('input').forEach(inp=>{
+    </tr>
+    <tr id="split-row-${i}" class="${(TRX_SPLIT===i && it.alok)?'':'d-none'}"><td colspan="7" class="pt-0">${(TRX_SPLIT===i && it.alok)? panelSplit(it,i) : ''}</td></tr>`).join('');
+  tb.querySelectorAll('input[data-k]').forEach(inp=>{
     inp.addEventListener('input', e=>{
       const tr=e.target.closest('tr'); const i=+tr.dataset.i; const k=e.target.dataset.k;
       TRX_ITEMS[i][k]=(k==='barang'||k==='satuan')? e.target.value : Number(e.target.value);
-      tr.querySelector('.jml-cell').textContent = rp((Number(TRX_ITEMS[i].banyaknya)||0)*(Number(TRX_ITEMS[i].harga_satuan)||0));
+      tr.querySelector('.jml-cell').textContent = rp(jmlItem(TRX_ITEMS[i]));
+      if(TRX_ITEMS[i].alok) segarkanBagi(i);
       updateTotal();
     });
   });
   updateTotal();
 }
 function updateTotal(){
-  const total=TRX_ITEMS.reduce((a,b)=>a+(Number(b.banyaknya)||0)*(Number(b.harga_satuan)||0),0);
+  const total=TRX_ITEMS.reduce((a,b)=>a+jmlItem(b),0);
   const el=document.getElementById('itemTotal'); if(el) el.textContent=rp(total);
   renderRingkasRab();
 }
 function tambahItem(){
   const last=TRX_ITEMS[TRX_ITEMS.length-1];
-  TRX_ITEMS.push({barang:'',banyaknya:1,satuan:'Buah',harga_satuan:0,pekerjaan_id:last? (last.pekerjaan_id??null) : null});
+  TRX_ITEMS.push({barang:'',banyaknya:1,satuan:'Buah',harga_satuan:0,pekerjaan_id:(last && !last.alok)? (last.pekerjaan_id??null) : null,alok:null});
   drawItems();
 }
-function hapusItem(i){ TRX_ITEMS.splice(i,1); if(!TRX_ITEMS.length) tambahItem(); else drawItems(); }
+function hapusItem(i){ TRX_ITEMS.splice(i,1); TRX_SPLIT=null; if(!TRX_ITEMS.length) tambahItem(); else drawItems(); }
+
+/* ===== ALOKASI: 1 item dibagi ke beberapa Pekerjaan RAB ===== */
+let TRX_SPLIT = null; // index item yang panel pembagiannya terbuka
+const jmlItem = it => (Number(it.banyaknya)||0)*(Number(it.harga_satuan)||0);
+function namaPekRab(id){ return ((APP.cache.rab||[]).find(p=>Number(p.id)===Number(id))||{}).nama||'-'; }
+function singkatPek(id){ const n=namaPekRab(id), m=n.match(/\(([^)]+)\)/); return m? m[1] : n.replace(/^(Rehabilitasi|Pembangunan|Pekerjaan)\s+((Sedang|Berat|Ringan)\s+)?/i,'').replace(/^Ruang\s+/i,''); }
+function sisaAlok(it){
+  const target = it.alok.mode==='qty'? (Number(it.banyaknya)||0) : jmlItem(it);
+  const dibagi = it.alok.baris.reduce((a,b)=>a+(Number(b.nilai)||0),0);
+  return Math.round((target-dibagi)*100)/100;
+}
+// nominal rupiah tiap baris pembagian; bila pembagian pas, selisih pembulatan masuk ke baris terakhir
+function nominalAlokasi(it){
+  const arr=it.alok.baris.map(b=> it.alok.mode==='qty'? Math.round((Number(b.nilai)||0)*(Number(it.harga_satuan)||0)) : Math.round(Number(b.nilai)||0));
+  if(arr.length && sisaAlok(it)===0){ const sel=Math.round(jmlItem(it))-arr.reduce((a,b)=>a+b,0); arr[arr.length-1]+=sel; }
+  return arr;
+}
+function alokasiItem(it){ // -> [{pekerjaan_id, nominal}]
+  if(it.alok){ const nom=nominalAlokasi(it); return it.alok.baris.map((b,k)=>({pekerjaan_id:b.pekerjaan_id, nominal:nom[k]})).filter(x=>x.pekerjaan_id); }
+  return it.pekerjaan_id? [{pekerjaan_id:it.pekerjaan_id, nominal:jmlItem(it)}] : [];
+}
+function alokasiValid(it){ return !it.alok || (sisaAlok(it)===0 && it.alok.baris.length>0 && it.alok.baris.every(b=>b.pekerjaan_id && Number(b.nilai)>0)); }
+const fmtNilaiBagi = (it,v) => it.alok.mode==='qty'? `${num(v)} ${esc(it.satuan||'')}` : rp(v);
+function teksSisaAlok(it){
+  const s=sisaAlok(it);
+  if(s===0) return '<span class="text-success"><i class="bi bi-check-circle-fill"></i> Pas — seluruh item sudah dibagi.</span>';
+  return `<span class="text-danger"><i class="bi bi-exclamation-circle-fill"></i> ${s>0?'Sisa belum dibagi':'Kelebihan'}: <b>${fmtNilaiBagi(it,Math.abs(s))}</b></span>`;
+}
+function chipAlok(it){
+  const s=sisaAlok(it);
+  return it.alok.baris.filter(b=>b.pekerjaan_id).map(b=>`<span class="chip d-inline-block mb-1">${esc(singkatPek(b.pekerjaan_id))}: ${fmtNilaiBagi(it,b.nilai)}</span>`).join(' ')
+    + (s!==0? `<div class="text-danger" style="font-size:.75rem"><i class="bi bi-exclamation-circle"></i> Belum pas, ${s>0?'sisa':'lebih'} ${fmtNilaiBagi(it,Math.abs(s))}</div>` : '');
+}
+function selPekCell(it,i){
+  if(it.alok) return `<div class="d-flex align-items-start gap-1"><div class="flex-grow-1" id="pek-chip-${i}">${chipAlok(it)}</div>
+    <button type="button" class="btn btn-sm btn-outline-primary py-0" onclick="toggleSplit(${i})" title="Atur pembagian"><i class="bi bi-sliders"></i></button></div>`;
+  return `<select class="form-select form-select-sm" onchange="pilihPekItem(${i},this.value)"><option value="">— pilih —</option>${optPekerjaan(it.pekerjaan_id)}<option value="__bagi">⇄ Bagi ke beberapa pekerjaan…</option></select>`;
+}
+function eqBagi(it,b){ return it.alok.mode==='qty'? rp(Math.round((Number(b.nilai)||0)*(Number(it.harga_satuan)||0))) : `${num(Math.round((Number(b.nilai)||0)/(Number(it.harga_satuan)||1)*100)/100)} ${esc(it.satuan||'')}`; }
+function panelSplit(it,i){
+  const dipakai=it.alok.baris.map(b=>Number(b.pekerjaan_id)).filter(Boolean), qty=it.alok.mode==='qty';
+  return `<div class="border rounded p-2 ms-md-4" style="background:#f7faff">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+      <div class="small fw-semibold"><i class="bi bi-diagram-3 me-1"></i>Bagi "${esc(it.barang||'item')}" — ${num(it.banyaknya)} ${esc(it.satuan||'')} = ${rp(jmlItem(it))}</div>
+      <div class="btn-group btn-group-sm">
+        <button type="button" class="btn ${qty?'btn-brand':'btn-outline-secondary'}" onclick="gantiModeBagi(${i},'qty')">Bagi per qty</button>
+        <button type="button" class="btn ${qty?'btn-outline-secondary':'btn-brand'}" onclick="gantiModeBagi(${i},'nominal')">Bagi per nominal (Rp)</button>
+      </div>
+    </div>
+    <table class="table table-sm align-middle mb-1 bg-white">
+      <thead><tr><th style="width:52%">Pekerjaan RAB</th><th style="width:20%">${qty? 'Qty ('+esc(it.satuan||'')+')' : 'Nominal (Rp)'}</th><th class="text-end">${qty?'Nominal':'Setara qty'}</th><th></th></tr></thead>
+      <tbody>${it.alok.baris.map((b,k)=>`<tr>
+        <td><select class="form-select form-select-sm" onchange="setPekBagi(${i},${k},this.value)"><option value="">— pilih —</option>${(APP.cache.rab||[]).filter(p=>!dipakai.includes(Number(p.id)) || Number(p.id)===Number(b.pekerjaan_id)).map(p=>`<option value="${p.id}" ${Number(p.id)===Number(b.pekerjaan_id)?'selected':''}>${esc(p.nama)}</option>`).join('')}</select></td>
+        <td><input type="number" step="any" min="0" class="form-control form-control-sm" value="${b.nilai}" oninput="setNilaiBagi(${i},${k},this.value)"></td>
+        <td class="text-end text-nowrap" id="eq-${i}-${k}">${eqBagi(it,b)}</td>
+        <td><button type="button" class="btn btn-sm btn-outline-danger py-0" onclick="hapusBagi(${i},${k})" ${it.alok.baris.length<=1?'disabled':''}><i class="bi bi-x"></i></button></td></tr>`).join('')}</tbody>
+    </table>
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div class="small" id="sisa-${i}">${teksSisaAlok(it)}</div>
+      <div class="d-flex gap-1 flex-wrap">
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="tambahBagi(${i})" ${it.alok.baris.length>=(APP.cache.rab||[]).length?'disabled':''}><i class="bi bi-plus"></i> Pekerjaan</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="bagiRata(${i})">Bagi rata</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="sisaKeTerakhir(${i})">Sisa ke baris terakhir</button>
+        <button type="button" class="btn btn-sm btn-outline-warning" onclick="batalBagi(${i})">Batalkan pembagian</button>
+        <button type="button" class="btn btn-sm btn-brand" onclick="toggleSplit(${i})"><i class="bi bi-check-lg me-1"></i>Selesai</button>
+      </div>
+    </div>
+  </div>`;
+}
+// gambar ulang sel pekerjaan + panel 1 item saja
+function renderSplit(i){
+  const it=TRX_ITEMS[i]; if(!it) return;
+  const c=document.getElementById('pek-cell-'+i), r=document.getElementById('split-row-'+i);
+  if(c) c.innerHTML=selPekCell(it,i);
+  if(r){ const buka=(TRX_SPLIT===i && !!it.alok); r.classList.toggle('d-none',!buka); r.firstElementChild.innerHTML= buka? panelSplit(it,i) : ''; }
+  renderRingkasRab();
+}
+// segarkan angka tanpa menggambar ulang input (agar kursor tidak hilang)
+function segarkanBagi(i){
+  const it=TRX_ITEMS[i]; if(!it||!it.alok) return;
+  const ch=document.getElementById('pek-chip-'+i); if(ch) ch.innerHTML=chipAlok(it);
+  const sx=document.getElementById('sisa-'+i); if(sx) sx.innerHTML=teksSisaAlok(it);
+  it.alok.baris.forEach((b,k)=>{ const e=document.getElementById(`eq-${i}-${k}`); if(e) e.textContent=eqBagi(it,b); });
+  renderRingkasRab();
+}
+function toggleSplit(i){ const prev=TRX_SPLIT; TRX_SPLIT=(TRX_SPLIT===i)? null : i; if(prev!=null && prev!==i) renderSplit(prev); renderSplit(i); }
+function pilihPekItem(i,v){
+  const it=TRX_ITEMS[i];
+  if(v==='__bagi'){
+    it.alok={ mode:'qty', baris:[{pekerjaan_id:it.pekerjaan_id||null, nilai:Number(it.banyaknya)||0},{pekerjaan_id:null, nilai:0}] };
+    it.pekerjaan_id=null; const prev=TRX_SPLIT; TRX_SPLIT=i; if(prev!=null && prev!==i) renderSplit(prev); renderSplit(i); return;
+  }
+  it.pekerjaan_id = v? Number(v) : null; renderRingkasRab();
+}
+function setPekBagi(i,k,v){ TRX_ITEMS[i].alok.baris[k].pekerjaan_id = v? Number(v) : null; renderSplit(i); }
+function setNilaiBagi(i,k,v){ TRX_ITEMS[i].alok.baris[k].nilai = Number(v)||0; segarkanBagi(i); }
+function gantiModeBagi(i,mode){
+  const it=TRX_ITEMS[i]; if(it.alok.mode===mode) return;
+  const h=Number(it.harga_satuan)||0;
+  it.alok.baris.forEach(b=>{ b.nilai = mode==='nominal'? Math.round((Number(b.nilai)||0)*h) : (h? Math.round((Number(b.nilai)||0)/h*100)/100 : 0); });
+  it.alok.mode=mode; renderSplit(i);
+}
+function tambahBagi(i){ TRX_ITEMS[i].alok.baris.push({pekerjaan_id:null, nilai:0}); renderSplit(i); }
+function hapusBagi(i,k){ TRX_ITEMS[i].alok.baris.splice(k,1); renderSplit(i); }
+function bagiRata(i){
+  const it=TRX_ITEMS[i], n=it.alok.baris.length, qty=it.alok.mode==='qty';
+  const target= qty? (Number(it.banyaknya)||0) : jmlItem(it), dec= qty? 100 : 1, per=Math.floor(target/n*dec)/dec;
+  it.alok.baris.forEach((b,k)=> b.nilai = k<n-1? per : Math.round((target-per*(n-1))*dec)/dec);
+  renderSplit(i);
+}
+function sisaKeTerakhir(i){ const it=TRX_ITEMS[i], b=it.alok.baris[it.alok.baris.length-1]; b.nilai=Math.round(((Number(b.nilai)||0)+sisaAlok(it))*100)/100; renderSplit(i); }
+function batalBagi(i){ const it=TRX_ITEMS[i]; it.pekerjaan_id=(it.alok.baris.find(b=>b.pekerjaan_id)||{}).pekerjaan_id||null; it.alok=null; TRX_SPLIT=null; renderSplit(i); }
+// muat pembagian item yang tersimpan -> {item_id: [{pekerjaan_id, nilai}]}
+async function muatAlokasi(items){
+  const ids=(items||[]).filter(i=>i.alokasi_mode).map(i=>i.id);
+  if(!ids.length) return {};
+  const {data,error}=await sb.from('transaksi_item_alokasi').select('*').in('item_id',ids).order('urutan');
+  if(error){ toast('Pembagian pekerjaan gagal dimuat: '+error.message,'danger'); return {}; }
+  const m={}; (data||[]).forEach(a=>(m[a.item_id]=m[a.item_id]||[]).push({pekerjaan_id:a.pekerjaan_id, nilai:Number(a.nilai)||0}));
+  return m;
+}
+
+/* ===== NO. BUKTI otomatis = No. Urut (3 digit), tetap bisa diedit ===== */
+function noUrutBerubah(){
+  const nb=document.getElementById('t-no_bukti'); if(!nb) return;
+  const no=Number(document.getElementById('t-no').value)||0;
+  nb.placeholder = no? pad3(no) : 'mis. 001';
+  if(nb.dataset.manual!=='1') nb.value = no? pad3(no) : '';
+  cekNoBukti();
+}
+function noBuktiIkutUrut(){
+  const nb=document.getElementById('t-no_bukti'); if(!nb) return;
+  const no=Number(document.getElementById('t-no').value)||0;
+  nb.value = no? pad3(no) : ''; nb.dataset.manual=''; cekNoBukti();
+}
+function cekNoBukti(){
+  const nb=document.getElementById('t-no_bukti'), w=document.getElementById('t-nobukti-warn'); if(!nb||!w) return;
+  const v=nb.value.trim(), sendiri=Number(nb.dataset.trx)||null;
+  const dobel = v && (APP.cache.transaksi||[]).find(t=>t.id!==sendiri && String(t.no_bukti||'').trim()===v);
+  w.innerHTML = dobel? `<i class="bi bi-exclamation-triangle"></i> No. Bukti ini sudah dipakai transaksi No. ${pad3(dobel.no_urut)}.` : '';
+}
 
 function samakanTanggal(){
   const dasar = document.getElementById('t-tgl_faktur').value;
@@ -1602,15 +1750,29 @@ function optPekerjaan(selId){
 
 // jumlah item per pekerjaan; excludeTrxId = abaikan item transaksi tsb (dipakai saat edit)
 async function hitungRealisasi(excludeTrxId){
-  const {data, error} = await sb.from('transaksi_item').select('transaksi_id, pekerjaan_id, jumlah');
+  const {data, error} = await sb.from('transaksi_item').select('*');
   if(error) return { ok:false, msg:error.message, per:{}, belum:0, total:0 };
+  // pembagian item (diabaikan bila tabel belum ada)
+  let alok=[];
+  if((data||[]).some(i=>i.alokasi_mode)){
+    const r=await sb.from('transaksi_item_alokasi').select('item_id, pekerjaan_id, nominal');
+    if(!r.error) alok=r.data||[];
+  }
+  const byItem={}; alok.forEach(a=>(byItem[a.item_id]=byItem[a.item_id]||[]).push(a));
   const per={}; let belum=0, total=0;
   const adaPek = new Set((APP.cache.rab||[]).map(p=>Number(p.id)));
   (data||[]).forEach(i=>{
     if(excludeTrxId && i.transaksi_id===excludeTrxId) return;
     const n=Number(i.jumlah)||0; total+=n;
-    const k=Number(i.pekerjaan_id);
-    if(i.pekerjaan_id!=null && adaPek.has(k)) per[k]=(per[k]||0)+n; else belum+=n;
+    if(i.alokasi_mode && byItem[i.id]){
+      let dibagi=0;
+      byItem[i.id].forEach(a=>{ const k=Number(a.pekerjaan_id), v=Number(a.nominal)||0;
+        if(a.pekerjaan_id!=null && adaPek.has(k)){ per[k]=(per[k]||0)+v; dibagi+=v; } });
+      belum += Math.max(0, n-dibagi);
+    }else{
+      const k=Number(i.pekerjaan_id);
+      if(i.pekerjaan_id!=null && adaPek.has(k)) per[k]=(per[k]||0)+n; else belum+=n;
+    }
   });
   return { ok:true, per, belum, total };
 }
@@ -1618,7 +1780,9 @@ async function hitungRealisasi(excludeTrxId){
 function terapkanPekerjaanSemua(){
   const v=document.getElementById('t-pek-semua').value;
   if(!v){ toast('Pilih pekerjaan RAB dulu.','danger'); return; }
-  TRX_ITEMS.forEach(it=> it.pekerjaan_id=Number(v));
+  if(TRX_ITEMS.some(it=>it.alok) && !confirm('Item yang sudah dibagi ke beberapa pekerjaan akan dikembalikan ke 1 pekerjaan. Lanjutkan?')) return;
+  TRX_ITEMS.forEach(it=>{ it.pekerjaan_id=Number(v); it.alok=null; });
+  TRX_SPLIT=null;
   drawItems();
   toast('Pekerjaan RAB diterapkan ke semua item.');
 }
@@ -1631,8 +1795,9 @@ function renderRingkasRab(){
   const per={}; let belum=0;
   TRX_ITEMS.forEach(it=>{
     if(!(it.barang||'').trim()) return;
-    const n=(Number(it.banyaknya)||0)*(Number(it.harga_satuan)||0);
-    if(it.pekerjaan_id) per[it.pekerjaan_id]=(per[it.pekerjaan_id]||0)+n; else belum+=n;
+    const a=alokasiItem(it);
+    a.forEach(x=>{ per[x.pekerjaan_id]=(per[x.pekerjaan_id]||0)+x.nominal; });
+    belum += Math.max(0, jmlItem(it)-a.reduce((s,x)=>s+x.nominal,0));
   });
   const baris = Object.keys(per).map(k=>{
     const p=rab.find(x=>Number(x.id)===Number(k)); if(!p) return '';
@@ -1642,7 +1807,7 @@ function renderRingkasRab(){
     return `<tr class="${sisa<0?'table-danger':''}"><td>${esc(p.nama)}</td><td class="text-end">${rp(n)}</td><td class="text-end">${rp(pagu-terpakai)}</td>
       <td class="text-end fw-semibold">${rp(sisa)}${sisa<0?' <i class="bi bi-exclamation-triangle text-danger" title="Melebihi pagu RAB"></i>':''}</td></tr>`;
   }).join('');
-  const bBelum = belum? `<tr class="table-warning"><td><i>Belum dipilih pekerjaan</i></td><td class="text-end">${rp(belum)}</td><td colspan="2" class="small">Masuk "belum dialokasikan"</td></tr>` : '';
+  const bBelum = belum? `<tr class="table-warning"><td><i>Belum dialokasikan</i></td><td class="text-end">${rp(belum)}</td><td colspan="2" class="small">Masuk "belum dialokasikan"</td></tr>` : '';
   if(!baris && !bBelum){ el.innerHTML=''; return; }
   const lebih = TRX_REAL_LAIN && Object.keys(per).some(k=>{ const p=rab.find(x=>Number(x.id)===Number(k)); return p && (Number(p.pagu)||0)-(TRX_REAL_LAIN[k]||0)-per[k] < 0; });
   el.innerHTML = `<div class="fw-semibold small mb-1">Alokasi Pekerjaan RAB transaksi ini</div>
@@ -1775,6 +1940,8 @@ async function simpanTransaksi(id){
   };
   const clean=TRX_ITEMS.filter(i=>i.barang.trim());
   if(!clean.length){ toast('Minimal 1 item dengan nama barang.','danger'); return false; }
+  const bagiSalah=clean.filter(it=>!alokasiValid(it));
+  if(bagiSalah.length){ toast('Pembagian pekerjaan belum pas / ada baris tanpa pekerjaan: '+bagiSalah.map(it=>esc(it.barang.trim())).join(', '),'danger'); return false; }
 
   let trxId=id, oldIds=null;
   if(id){
@@ -1789,11 +1956,32 @@ async function simpanTransaksi(id){
     if(error){ toast('Gagal: '+error.message,'danger'); return false; }
     trxId=data.id;
   }
-  const rows=clean.map((it,idx)=>({transaksi_id:trxId,barang:it.barang.trim(),banyaknya:Number(it.banyaknya)||0,satuan:it.satuan||'Buah',harga_satuan:Number(it.harga_satuan)||0,urutan:idx,pekerjaan_id:it.pekerjaan_id? Number(it.pekerjaan_id) : null}));
-  const {error:e2}=await sb.from('transaksi_item').insert(rows);
+  const rows=clean.map((it,idx)=>{
+    const r={transaksi_id:trxId,barang:it.barang.trim(),banyaknya:Number(it.banyaknya)||0,satuan:it.satuan||'Buah',harga_satuan:Number(it.harga_satuan)||0,urutan:idx,
+      pekerjaan_id:(!it.alok && it.pekerjaan_id)? Number(it.pekerjaan_id) : null};
+    if(it.alok) r.alokasi_mode=it.alok.mode;   // hanya dikirim bila item dibagi
+    return r;
+  });
+  const {data:itemBaru, error:e2}=await sb.from('transaksi_item').insert(rows).select('id,urutan');
   if(e2){
-    const pesan = /pekerjaan_id/.test(e2.message)? ' (kolom pekerjaan_id belum ada: jalankan SQL Pekerjaan RAB dulu)' : '';
+    const pesan = /alokasi_mode/.test(e2.message)? ' (kolom alokasi_mode belum ada: jalankan SQL Alokasi dulu)'
+      : /pekerjaan_id/.test(e2.message)? ' (kolom pekerjaan_id belum ada: jalankan SQL Pekerjaan RAB dulu)' : '';
     toast('Item gagal disimpan: '+e2.message+pesan+(oldIds?' — item lama tetap utuh.':''),'danger'); return false;
+  }
+  // simpan pembagian item
+  const alokRows=[];
+  clean.forEach((it,idx)=>{
+    if(!it.alok) return;
+    const item=(itemBaru||[]).find(b=>Number(b.urutan)===idx); if(!item) return;
+    const nom=nominalAlokasi(it);
+    it.alok.baris.forEach((b,k)=>alokRows.push({ item_id:item.id, pekerjaan_id:Number(b.pekerjaan_id), nilai:Number(b.nilai)||0, nominal:nom[k], urutan:k }));
+  });
+  if(alokRows.length){
+    const {error:e4}=await sb.from('transaksi_item_alokasi').insert(alokRows);
+    if(e4){
+      await sb.from('transaksi_item').delete().in('id',(itemBaru||[]).map(b=>b.id)); // batalkan item baru
+      toast('Pembagian pekerjaan gagal disimpan: '+e4.message+(oldIds?' — item lama tetap utuh.':''),'danger'); return false;
+    }
   }
   if(oldIds && oldIds.length){
     const {error:e3}=await sb.from('transaksi_item').delete().in('id', oldIds);
@@ -2203,7 +2391,7 @@ async function sinkronTransaksiUpah(P){
     if(error){ toast('Gagal perbarui transaksi upah: '+error.message,'danger'); return false; }
   }else{
     const no=(APP.cache.transaksi.reduce((m,t)=>Math.max(m,Number(t.no_urut)||0),0)||0)+1;
-    const {data,error}=await sb.from('transaksi').insert({ ...head, no_urut:no, kategori_id:kategoriUpah(), toko_id:null }).select().single();
+    const {data,error}=await sb.from('transaksi').insert({ ...head, no_urut:no, no_bukti:pad3(no), kategori_id:kategoriUpah(), toko_id:null }).select().single();
     if(error){ toast('Gagal buat transaksi upah: '+error.message,'danger'); return false; }
     tid=data.id; APP.cache.transaksi.push(data); // agar no urut periode berikutnya tidak bentrok
     const {error:eU}=await sb.from('upah_lembar').update({transaksi_id:tid}).eq('id',P.id);
