@@ -501,7 +501,8 @@ RENDER.transaksi = function(){
         <td class="text-end fw-semibold" id="nilai-${t.id}">…</td>
         <td class="text-center">
           <button class="btn btn-sm btn-outline-primary" onclick="pilihCetak(${t.id})" title="Cetak"><i class="bi bi-printer"></i></button>
-          ${isAdmin()? `<button class="btn btn-sm btn-outline-secondary" onclick="formTransaksi(${t.id})" title="Edit"><i class="bi bi-pencil"></i></button>
+          ${isAdmin()? `<button class="btn btn-sm btn-outline-success" onclick="formTransaksi(null, ${t.id})" title="Salin"><i class="bi bi-copy"></i></button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="formTransaksi(${t.id})" title="Edit"><i class="bi bi-pencil"></i></button>
           <button class="btn btn-sm btn-outline-danger" onclick="hapusTransaksi(${t.id})" title="Hapus"><i class="bi bi-trash"></i></button>`:''}
         </td>
       </tr>`).join('') : `<tr><td colspan="6" class="text-center text-muted py-4">Tidak ada data.</td></tr>`;
@@ -1318,13 +1319,24 @@ function showModal(title, bodyHtml, onSave, size=''){
 
 let TRX_ITEMS=[];
 
-async function formTransaksi(id){
+async function formTransaksi(id, salinDari){
   if(!isAdmin()) return;
-  let trx={}, items=[];
+  let trx={}, items=[], src=null;
   let nextNo = (APP.cache.transaksi.reduce((m,t)=>Math.max(m,t.no_urut),0)||0)+1;
   if(id){
     trx = APP.cache.transaksi.find(t=>t.id===id)||{};
     const {data}=await sb.from('transaksi_item').select('*').eq('transaksi_id',id).order('urutan');
+    items=data||[];
+  }else if(salinDari){
+    src = APP.cache.transaksi.find(t=>t.id===salinDari);
+    if(!src){ toast('Transaksi sumber tidak ditemukan.','danger'); return; }
+    // hanya field yang disalin; no urut, tanggal, no bukti & link scan sengaja dikosongkan
+    trx = {
+      kategori_id: src.kategori_id, toko_id: src.toko_id, uraian: src.uraian,
+      nama_pemeriksa: src.nama_pemeriksa, jabatan_pemeriksa: src.jabatan_pemeriksa,
+      tarif_pajak_persen: src.tarif_pajak_persen,
+    };
+    const {data}=await sb.from('transaksi_item').select('*').eq('transaksi_id',salinDari).order('urutan');
     items=data||[];
   }
   TRX_ITEMS = items.length? items.map(i=>({barang:i.barang,banyaknya:i.banyaknya,satuan:i.satuan,harga_satuan:i.harga_satuan,pekerjaan_id:i.pekerjaan_id??null})) : [{barang:'',banyaknya:1,satuan:'Buah',harga_satuan:0,pekerjaan_id:null}];
@@ -1334,7 +1346,8 @@ async function formTransaksi(id){
   const optToko= APP.cache.toko.map(t=>`<option value="${t.id}" ${trx.toko_id===t.id?'selected':''}>${esc(t.nama_toko)}</option>`).join('');
   const optPaj = APP.cache.pajak.filter(p=>p.aktif).map(p=>`<option value="${p.persen}" ${Number(trx.tarif_pajak_persen)===Number(p.persen)?'selected':''}>${esc(p.nama)} (${(p.persen*100)}%)</option>`).join('');
 
-  const body=`
+  const infoSalin = src? `<div class="alert alert-info py-2 small"><i class="bi bi-copy me-1"></i>Disalin dari transaksi <b>No. ${pad3(src.no_urut)}</b>. Tanggal, No. Bukti &amp; Link Scan dikosongkan — isi yang baru, lalu periksa item sebelum simpan.</div>` : '';
+  const body=`${infoSalin}
     <div class="row">
       <div class="col-md-3 mb-3"><label class="form-label small fw-semibold">No. Urut</label>
         <input type="number" class="form-control" id="t-no" value="${trx.no_urut||nextNo}"></div>
@@ -1408,7 +1421,7 @@ async function formTransaksi(id){
       </div>
     </div>`;
 
-  showModal((id?'Edit':'Tambah')+' Transaksi', body, ()=>simpanTransaksi(id), 'modal-xl');
+  showModal(id? 'Edit Transaksi' : (src? 'Salin Transaksi' : 'Tambah Transaksi'), body, ()=>simpanTransaksi(id), 'modal-xl');
   drawItems();
   renderChipFrasa();
   // realisasi pekerjaan lain (tanpa transaksi yang sedang diedit) untuk hitung sisa pagu
