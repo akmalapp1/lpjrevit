@@ -46,6 +46,12 @@
   .lembar-btn .sub{ font-size:.72rem; opacity:.85; }
   .lembar-btn.kosong{ color:#8a96a3; border-style:dashed; background:#f8f9fa; }
   .lembar-btn.active{ background:var(--brand); color:#fff; border-color:var(--brand); border-style:solid; }
+  .hd.libur{ background:repeating-linear-gradient(45deg,#eceff3,#eceff3 4px,#fff 4px,#fff 8px); color:#8a96a3; cursor:not-allowed; font-size:.62rem; font-weight:600; }
+  .hd.bentrok{ outline:2px solid #dc3545; outline-offset:1px; }
+  .table th.libur{ background:#e9ecef; color:#8a96a3; }
+  .per-row{ cursor:pointer; }
+  .per-row.aktif td{ background:var(--chip-bg) !important; }
+  .doc .ttd-hari.lib{ background:#e9e9e9; font-size:9pt; font-style:italic; }  
   .doc.doc-land{ width:277mm; min-height:auto; }
   .doc .ttd-hari{ height:36px; text-align:center; vertical-align:middle; }
   .doc .ttd-hari.off{ background:repeating-linear-gradient(45deg,#eee,#eee 4px,#fff 4px,#fff 8px); font-size:9pt; }
@@ -1796,39 +1802,44 @@ async function simpanTransaksi(id){
   await loadAll(); RENDER.transaksi(); toast('Transaksi disimpan.'); return true;
 }
 
-/* ================= UPAH HARIAN ================= */
+/* ================= UPAH HARIAN (v4: periode bebas per pekerjaan) ================= */
 const TARIF_UPAH = { 'Kepala Tukang':200000, 'Tukang':150000, 'Pekerja':110000 };
 const URUT_JAB   = { 'Kepala Tukang':1, 'Tukang':2, 'Pekerja':3 };
-const NAMA_HARI  = ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu'];
-const UPAH = { mulai:null, aktif:null, lembar:{}, atur:false };
+const HARI_NM    = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu']; // index = getDay()
+const HARI_3     = ['Min','Sen','Sel','Rab','Kam','Jum','Sab'];
+const URUT_LIBUR = [1,2,3,4,5,6,0];  // urutan tampil Sen..Min
+const MAKS_HARI  = 7;
+const UPAH = { pekAktif:null, perAktif:null, periode:[], atur:false };
 
 function isoLokal(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
-function seninDari(iso){ const d=new Date(iso+'T00:00'); d.setDate(d.getDate()-((d.getDay()+6)%7)); return isoLokal(d); }
-function tambahHari(iso,n){ const d=new Date(iso+'T00:00'); d.setDate(d.getDate()+n); return isoLokal(d); }
-function tglPekan(){ return [0,1,2,3,4,5,6].map(i=>tambahHari(UPAH.mulai,i)); }
-function teksPeriode(){
-  const a=new Date(UPAH.mulai+'T00:00'), b=new Date(tambahHari(UPAH.mulai,6)+'T00:00');
-  const bln=d=>d.toLocaleDateString('id-ID',{month:'long'});
-  if(a.getMonth()===b.getMonth()) return `${a.getDate()} s/d ${b.getDate()} ${bln(b)} ${b.getFullYear()}`;
-  if(a.getFullYear()===b.getFullYear()) return `${a.getDate()} ${bln(a)} s/d ${b.getDate()} ${bln(b)} ${b.getFullYear()}`;
-  return `${fmtTgl(isoLokal(a))} s/d ${fmtTgl(isoLokal(b))}`;
-}
+const tglD = s => new Date(s+'T00:00');
+function tambahHari(iso,n){ const d=tglD(iso); d.setDate(d.getDate()+n); return isoLokal(d); }
+function selisihHari(a,b){ return Math.round((tglD(b)-tglD(a))/864e5); }
+const ddmm = s => `${String(tglD(s).getDate()).padStart(2,'0')}/${String(tglD(s).getMonth()+1).padStart(2,'0')}`;
 const fmtHari = x => (Math.round((Number(x)||0)*2)/2).toString().replace('.',',');
+function tanggalPeriode(P){ const out=[]; if(!P.tgl_mulai||!P.tgl_selesai) return out; for(let s=P.tgl_mulai; s<=P.tgl_selesai && out.length<31; s=tambahHari(s,1)) out.push(s); return out; }
+function isLibur(P,t){ return (P.hari_libur||[]).includes(tglD(t).getDay()); }
+function teksPeriode(P){
+  const a=tglD(P.tgl_mulai), b=tglD(P.tgl_selesai), bln=d=>d.toLocaleDateString('id-ID',{month:'long'});
+  if(P.tgl_mulai===P.tgl_selesai) return fmtTgl(P.tgl_mulai);
+  if(a.getFullYear()!==b.getFullYear()) return `${fmtTgl(P.tgl_mulai)} s/d ${fmtTgl(P.tgl_selesai)}`;
+  if(a.getMonth()===b.getMonth()) return `${a.getDate()} s/d ${b.getDate()} ${bln(b)} ${b.getFullYear()}`;
+  return `${a.getDate()} ${bln(a)} s/d ${b.getDate()} ${bln(b)} ${b.getFullYear()}`;
+}
+const pendekPeriode = P => `${HARI_3[tglD(P.tgl_mulai).getDay()]} ${ddmm(P.tgl_mulai)} – ${HARI_3[tglD(P.tgl_selesai).getDay()]} ${ddmm(P.tgl_selesai)}`;
+const tumpang = (a1,a2,b1,b2) => a1<=b2 && b1<=a2;
 function pekerjaanHarian(){ return (APP.cache.rab||[]).filter(p=>p.pakai_upah_harian); }
 function namaPek(id){ return ((APP.cache.rab||[]).find(p=>Number(p.id)===Number(id))||{}).nama||'-'; }
+function urutPek(id){ return ((APP.cache.rab||[]).find(p=>Number(p.id)===Number(id))||{}).urutan||0; }
 function pekerjaById(id){ return (APP.cache.pekerja||[]).find(p=>Number(p.id)===Number(id))||{}; }
-function lembarKosong(pid){ return { id:null, pekerjaan_id:pid, uraian:'', tgl_bayar:null, transaksi_id:null, rows:[], dirty:false }; }
-function getLembar(pid){ return UPAH.lembar[pid] || (UPAH.lembar[pid]=lembarKosong(pid)); }
-function lembarAktif(){ return UPAH.aktif!=null? getLembar(UPAH.aktif) : null; }
-function adaDirty(){ return Object.values(UPAH.lembar).some(L=>L.dirty); }
-function jmlHariRow(r){ return (r.hari||[]).reduce((a,b)=>a+(Number(b)||0),0); }
-function totalLembar(L){ return L.rows.reduce((a,r)=>a+jmlHariRow(r)*(Number(r.upah_harian)||0),0); }
-function normHari(h){
-  let a = Array.isArray(h)? h : (typeof h==='string'? (()=>{ try{ return JSON.parse(h); }catch(e){ return []; } })() : []);
-  a = a.map(x=>Number(x)||0); while(a.length<7) a.push(0); return a.slice(0,7);
-}
-function sortRows(L){
-  L.rows.sort((a,b)=>{ const pa=pekerjaById(a.pekerja_id), pb=pekerjaById(b.pekerja_id);
+function periodePek(pid){ return UPAH.periode.filter(P=>Number(P.pekerjaan_id)===Number(pid)).sort((a,b)=>b.tgl_mulai.localeCompare(a.tgl_mulai)); }
+function periodeById(id){ return UPAH.periode.find(P=>P.id===id); }
+function periodeAktif(){ const P=periodeById(UPAH.perAktif); return (P && Number(P.pekerjaan_id)===Number(UPAH.pekAktif))? P : null; }
+function adaDirty(){ return UPAH.periode.some(P=>P.dirty); }
+function jmlHariRow(r){ return Object.values(r.hari||{}).reduce((a,b)=>a+(Number(b)||0),0); }
+function totalPeriode(P){ return P.rows.reduce((a,r)=>a+jmlHariRow(r)*(Number(r.upah_harian)||0),0); }
+function sortRows(P){
+  P.rows.sort((a,b)=>{ const pa=pekerjaById(a.pekerja_id), pb=pekerjaById(b.pekerja_id);
     return (URUT_JAB[pa.jabatan]||9)-(URUT_JAB[pb.jabatan]||9) || (pa.nama||'').localeCompare(pb.nama||''); });
 }
 function isiUpahDefault(jab){
@@ -1836,166 +1847,293 @@ function isiUpahDefault(jab){
   const cur=Number(el.value);
   if(!el.value || Object.values(TARIF_UPAH).includes(cur)) el.value = TARIF_UPAH[jab] ?? '';
 }
-
-// muat data 1 pekan (semua pekerjaan)
-async function muatPekan(iso){
-  UPAH.mulai=seninDari(iso); UPAH.lembar={}; UPAH.atur=false;
-  const pek=pekerjaanHarian();
-  pek.forEach(p=>getLembar(p.id));
-  const {data:lb, error}=await sb.from('upah_lembar').select('*').eq('pekan_mulai',UPAH.mulai);
-  if(error){ toast('Gagal memuat Upah Harian: '+error.message,'danger'); return false; }
-  const ids=(lb||[]).map(l=>l.id);
-  let hd=[];
-  if(ids.length){
-    const r=await sb.from('upah_hadir').select('*').in('lembar_id',ids).order('urutan');
-    if(r.error){ toast('Gagal memuat kehadiran: '+r.error.message,'danger'); return false; }
-    hd=r.data||[];
-  }
-  (lb||[]).forEach(l=>{
-    if(!pek.some(p=>Number(p.id)===Number(l.pekerjaan_id))) return; // pekerjaan tidak dicentang lagi: tidak ditampilkan
-    const L={ id:l.id, pekerjaan_id:l.pekerjaan_id, uraian:l.uraian||'', tgl_bayar:l.tgl_bayar, transaksi_id:l.transaksi_id, dirty:false,
-      rows: hd.filter(h=>h.lembar_id===l.id).map(h=>({ pekerja_id:h.pekerja_id, upah_harian:Number(h.upah_harian)||0, hari:normHari(h.hari) })) };
-    sortRows(L); UPAH.lembar[l.pekerjaan_id]=L;
+function parseJson(v,def){ if(v==null) return def; if(typeof v==='string'){ try{ return JSON.parse(v); }catch(e){ return def; } } return v; }
+// hari tersimpan sebagai {"2026-09-12":1,...}; dukung juga format lama (array Sen..Min dari v3)
+function normHadir(h,P){
+  const v=parseJson(h,{}), out={};
+  if(Array.isArray(v)) v.forEach((x,i)=>{ out[tambahHari(P.tgl_mulai,i)]=Number(x)||0; });
+  else Object.entries(v||{}).forEach(([k,x])=>{ out[k]=Number(x)||0; });
+  tanggalPeriode(P).forEach(t=>{ if(out[t]==null) out[t]=0; });
+  Object.keys(out).forEach(k=>{ if(k<P.tgl_mulai||k>P.tgl_selesai) delete out[k]; });
+  return out;
+}
+// tanggal di mana pekerja r juga hadir di periode lain -> {tanggal: [nama pekerjaan]}
+function bentrokRow(P,r){
+  const out={};
+  UPAH.periode.forEach(Q=>{
+    if(Q.id===P.id || !tumpang(P.tgl_mulai,P.tgl_selesai,Q.tgl_mulai,Q.tgl_selesai)) return;
+    const q=Q.rows.find(x=>Number(x.pekerja_id)===Number(r.pekerja_id)); if(!q) return;
+    Object.entries(r.hari).forEach(([t,v])=>{ if(v>0 && (q.hari[t]||0)>0) (out[t]=out[t]||[]).push(namaPek(Q.pekerjaan_id)); });
   });
-  if(!pek.some(p=>Number(p.id)===Number(UPAH.aktif))) UPAH.aktif = pek[0]? pek[0].id : null;
+  return out;
+}
+
+// ----- muat semua periode -----
+async function muatUpah(){
+  const {data:lb, error}=await sb.from('upah_lembar').select('*');
+  if(error){ toast('Gagal memuat Upah Harian: '+error.message,'danger'); return false; }
+  const {data:hd, error:e2}=await sb.from('upah_hadir').select('*').order('urutan');
+  if(e2){ toast('Gagal memuat kehadiran: '+e2.message,'danger'); return false; }
+  UPAH.periode=(lb||[]).filter(l=>l.tgl_mulai && l.tgl_selesai).map(l=>{
+    const P={ id:l.id, pekerjaan_id:l.pekerjaan_id, tgl_mulai:l.tgl_mulai, tgl_selesai:l.tgl_selesai,
+      hari_libur:(parseJson(l.hari_libur,[])||[]).map(Number), uraian:l.uraian||'', tgl_bayar:l.tgl_bayar, transaksi_id:l.transaksi_id, rows:[], dirty:false };
+    P.rows=(hd||[]).filter(h=>h.lembar_id===l.id).map(h=>({ pekerja_id:h.pekerja_id, upah_harian:Number(h.upah_harian)||0, hari:normHadir(h.hari,P) }));
+    sortRows(P); return P;
+  });
+  const pek=pekerjaanHarian();
+  if(!pek.some(p=>Number(p.id)===Number(UPAH.pekAktif))) UPAH.pekAktif = pek[0]? pek[0].id : null;
+  if(!periodeAktif()){ const ps=periodePek(UPAH.pekAktif); UPAH.perAktif = ps[0]? ps[0].id : null; }
   return true;
 }
 
 RENDER.upah = async function(){
   const el=document.getElementById('page-upah');
-  if(!UPAH.mulai) UPAH.mulai=seninDari(isoLokal(new Date()));
   if(adaDirty()){ gambarUpah(); return; } // jangan buang isian yang belum disimpan
   el.innerHTML='<h5 class="fw-bold mb-3">Upah Harian</h5><div class="text-muted">Memuat…</div>';
-  const ok=await muatPekan(UPAH.mulai);
-  if(!ok){ el.innerHTML='<h5 class="fw-bold mb-3">Upah Harian</h5><div class="alert alert-warning small">Data Upah Harian belum bisa dimuat. Pastikan SQL Upah Harian sudah dijalankan.</div>'; return; }
+  if(!(await muatUpah())){ el.innerHTML='<h5 class="fw-bold mb-3">Upah Harian</h5><div class="alert alert-warning small">Data Upah Harian belum bisa dimuat. Pastikan SQL Upah Harian v4 sudah dijalankan.</div>'; return; }
   gambarUpah();
 };
-
-async function bukaPekan(iso){
-  if(adaDirty() && !confirm('Ada isian yang belum disimpan. Tetap pindah pekan? (isian akan hilang)')){ gambarUpah(); return; }
-  const el=document.getElementById('page-upah');
-  el.innerHTML='<h5 class="fw-bold mb-3">Upah Harian</h5><div class="text-muted">Memuat…</div>';
-  UPAH.lembar={};
-  const ok=await muatPekan(iso);
-  if(!ok){ el.innerHTML='<h5 class="fw-bold mb-3">Upah Harian</h5><div class="alert alert-warning small">Data Upah Harian belum bisa dimuat.</div>'; return; }
-  gambarUpah();
-}
 
 function gambarUpah(){
   const el=document.getElementById('page-upah'); if(!el) return;
   const pek=pekerjaanHarian();
+  if(!pek.length){ el.innerHTML=`<h5 class="fw-bold mb-3">Upah Harian</h5><div class="alert alert-warning small">Belum ada Pekerjaan RAB yang dicentang <b>"Pakai upah harian"</b>.${isAdmin()?' Atur di Master Data → Pekerjaan RAB.':''}</div>`; return; }
   el.innerHTML=`
-    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-      <h5 class="fw-bold mb-0">Upah Harian</h5>
-      <div class="d-flex gap-1 flex-wrap">
-        <button class="btn btn-sm btn-outline-primary" onclick="cetakUpah('hadir',true)"><i class="bi bi-printer me-1"></i>Daftar Hadir semua pekerjaan</button>
-        <button class="btn btn-sm btn-outline-primary" onclick="cetakUpah('terima',true)"><i class="bi bi-printer me-1"></i>Tanda Terima semua pekerjaan</button>
+    <h5 class="fw-bold mb-3">Upah Harian</h5>
+    <div class="d-flex align-items-stretch gap-1 flex-wrap mb-3" id="up-tabs"></div>
+    <div class="card mb-3">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
+        <span class="fw-bold"><i class="bi bi-clock-history me-1"></i>Periode — <span id="up-judul"></span></span>
+        ${isAdmin()? `<button class="btn btn-brand btn-sm" onclick="modalPeriode('baru')"><i class="bi bi-plus-lg me-1"></i>Periode Baru</button>`:''}
       </div>
+      <div class="table-responsive"><table class="table table-hover align-middle mb-0">
+        <thead><tr><th class="ps-3">Periode</th><th class="text-center">Hari</th><th class="text-center">Libur</th><th class="text-center">Pekerja</th><th class="text-end">Total Upah</th><th>Status</th></tr></thead>
+        <tbody id="up-periode"></tbody>
+      </table></div>
     </div>
-    <div class="card mb-3"><div class="card-body py-2">
-      <div class="row g-2 align-items-end">
-        <div class="col-sm-4 col-md-3"><label class="form-label small fw-semibold mb-1">Pekan mulai (Senin)</label>
-          <input type="date" class="form-control form-control-sm" value="${UPAH.mulai}" onchange="if(this.value) bukaPekan(this.value)"></div>
-        <div class="col-sm-4 col-md-3"><label class="form-label small fw-semibold mb-1">s/d (Minggu)</label>
-          <input type="date" class="form-control form-control-sm" value="${tambahHari(UPAH.mulai,6)}" disabled></div>
-        <div class="col-md-6 text-md-end">
-          <button class="btn btn-sm btn-outline-secondary" onclick="bukaPekan(tambahHari(UPAH.mulai,-7))"><i class="bi bi-chevron-left"></i> Pekan lalu</button>
-          <button class="btn btn-sm btn-outline-secondary" onclick="bukaPekan(isoLokal(new Date()))">Pekan ini</button>
-          <button class="btn btn-sm btn-outline-secondary" onclick="bukaPekan(tambahHari(UPAH.mulai,7))">Pekan depan <i class="bi bi-chevron-right"></i></button>
-        </div>
-      </div>
-    </div></div>
-    ${pek.length? `
-      <div class="d-flex align-items-stretch gap-1 flex-wrap mb-1" id="up-tabs"></div>
-      <div class="text-muted mb-2" style="font-size:.78rem">Tab abu-abu putus-putus = pekan ini belum ada pekerja; tidak dicetak dan tidak membuat transaksi. Tanda <span class="text-warning">●</span> = belum disimpan.</div>
-      <div id="up-lembar"></div>`
-    : `<div class="alert alert-warning small">Belum ada Pekerjaan RAB yang dicentang <b>"Pakai upah harian"</b>.${isAdmin()?' Atur di Master Data → Pekerjaan RAB.':''}</div>`}`;
-  if(pek.length){ renderTabsUpah(); renderLembarUpah(); }
+    <div id="up-editor"></div>`;
+  renderTabsUpah(); renderDaftarPeriode(); renderEditorUpah();
 }
 
 function renderTabsUpah(){
   const el=document.getElementById('up-tabs'); if(!el) return;
   el.innerHTML=pekerjaanHarian().map(p=>{
-    const L=getLembar(p.id), n=L.rows.length;
-    return `<button type="button" class="btn btn-sm btn-outline-secondary lembar-btn ${n?'':'kosong'} ${Number(p.id)===Number(UPAH.aktif)?'active':''}" onclick="upahPilihTab(${p.id})">
-      <div class="fw-semibold">${esc(p.nama)}${L.dirty?' <span class="text-warning" title="Belum disimpan">●</span>':''}</div>
-      <div class="sub">${n? `${n} org · ${rp(totalLembar(L))}` : 'belum ada pekerja'}</div></button>`;
+    const ps=periodePek(p.id), last=ps[0], dirty=ps.some(P=>P.dirty);
+    return `<button type="button" class="btn btn-sm btn-outline-secondary lembar-btn ${ps.length?'':'kosong'} ${Number(p.id)===Number(UPAH.pekAktif)?'active':''}" onclick="upahPilihPek(${p.id})">
+      <div class="fw-semibold">${esc(p.nama)}${dirty?' <span class="text-warning" title="Ada yang belum disimpan">●</span>':''}</div>
+      <div class="sub">${ps.length? `${ps.length} periode · terakhir ${pendekPeriode(last)}` : 'belum ada periode'}</div></button>`;
   }).join('');
+  const j=document.getElementById('up-judul'); if(j) j.textContent=namaPek(UPAH.pekAktif);
 }
 
-function renderLembarUpah(){
-  const el=document.getElementById('up-lembar'); const L=lembarAktif(); if(!el||!L) return;
-  const adm=isAdmin(), ro=adm?'':'disabled', tg=tglPekan();
-  const pilihan=(APP.cache.pekerja||[]).filter(p=>p.aktif || L.rows.some(r=>Number(r.pekerja_id)===Number(p.id)));
-  const atur = (UPAH.atur && adm)? `<div class="border rounded p-2 mb-2">
-      <div class="small fw-semibold mb-1">Pekerja di "${esc(namaPek(L.pekerjaan_id))}" pekan ini:</div>
-      ${pilihan.length? `<div class="d-flex flex-wrap gap-3">${pilihan.map(p=>`<label class="form-check small mb-0"><input class="form-check-input" type="checkbox"
-          ${L.rows.some(r=>Number(r.pekerja_id)===Number(p.id))?'checked':''} onchange="upahAturPekerja(${p.id},this.checked)"> ${esc(p.nama)} <span class="text-muted">(${esc(p.jabatan||'-')})</span></label>`).join('')}</div>`
-        : '<div class="small text-muted">Belum ada data pekerja aktif. Tambahkan di Master Data → Data Pekerja.</div>'}
-      <div class="text-muted mt-1" style="font-size:.75rem">Satu pekerja boleh tercatat di lebih dari satu pekerjaan, asal harinya berbeda.</div>
-    </div>` : '';
-  let totH=0, tot=0;
-  const grid=L.rows.map((r,i)=>{
-    const p=pekerjaById(r.pekerja_id), h=jmlHariRow(r), j=h*(Number(r.upah_harian)||0); totH+=h; tot+=j;
+function renderDaftarPeriode(){
+  const el=document.getElementById('up-periode'); if(!el) return;
+  const ps=periodePek(UPAH.pekAktif);
+  el.innerHTML = ps.length? ps.map(P=>`
+    <tr class="per-row ${P.id===UPAH.perAktif?'aktif':''}" onclick="upahPilihPeriode(${P.id})">
+      <td class="ps-3"><div class="fw-semibold">${teksPeriode(P)}${P.dirty?' <span class="text-warning" title="Belum disimpan">●</span>':''}</div><div class="small text-muted">${pendekPeriode(P)}</div></td>
+      <td class="text-center">${tanggalPeriode(P).length}</td>
+      <td class="text-center">${P.hari_libur.length? URUT_LIBUR.filter(d=>P.hari_libur.includes(d)).map(d=>`<span class="chip">${HARI_3[d]}</span>`).join(' ') : '-'}</td>
+      <td class="text-center">${P.rows.length}</td>
+      <td class="text-end fw-semibold">${rp(totalPeriode(P))}</td>
+      <td>${P.tgl_bayar? `<span class="badge text-bg-success">Dibayar ${ddmm(P.tgl_bayar)}</span>` : '<span class="badge text-bg-warning">Belum dibayar</span>'}</td>
+    </tr>`).join('')
+    : `<tr><td colspan="6" class="text-center text-muted py-4">Belum ada periode untuk pekerjaan ini.${isAdmin()?' Klik <b>Periode Baru</b>.':''}</td></tr>`;
+}
+
+function renderEditorUpah(){
+  const el=document.getElementById('up-editor'); if(!el) return;
+  const P=periodeAktif(); if(!P){ el.innerHTML=''; return; }
+  const adm=isAdmin(), ro=adm?'':'disabled', tg=tanggalPeriode(P);
+  let totH=0, tot=0; const pesanBentrok=[];
+  const grid=P.rows.map((r,i)=>{
+    const p=pekerjaById(r.pekerja_id), h=jmlHariRow(r), j=h*(Number(r.upah_harian)||0), b=bentrokRow(P,r); totH+=h; tot+=j;
+    Object.entries(b).forEach(([t,ps])=>pesanBentrok.push(`<b>${esc(p.nama||'')}</b> pada ${HARI_NM[tglD(t).getDay()]} ${fmtTgl(t)} juga tercatat di ${esc(ps.join(', '))}`));
     return `<tr><td class="text-start ps-2 text-nowrap">${esc(p.nama||'(pekerja dihapus)')}</td><td class="text-start"><span class="chip">${esc(p.jabatan||'-')}</span></td>
-      ${r.hari.map((v,d)=>`<td class="${d===6?'bg-light':''}"><div class="hd ${adm?'klik':''} ${v>=1?'h1':v>0?'h05':''}" ${adm?`onclick="upahToggle(${i},${d})"`:''}>${v>=1?'1':v>0?'½':''}</div></td>`).join('')}
+      ${tg.map(t=>{
+        if(isLibur(P,t)) return `<td><div class="hd libur">Libur</div></td>`;
+        const v=r.hari[t]||0;
+        return `<td><div class="hd ${adm?'klik':''} ${v>=1?'h1':v>0?'h05':''} ${b[t]?'bentrok':''}" ${b[t]?`title="Juga tercatat di: ${esc(b[t].join(', '))}"`:''} ${adm?`onclick="upahToggle(${i},'${t}')"`:''}>${v>=1?'1':v>0?'½':''}</div></td>`;
+      }).join('')}
       <td class="fw-semibold">${fmtHari(h)}</td><td class="text-end">${rp(r.upah_harian)}</td><td class="text-end pe-2 fw-semibold">${rp(j)}</td></tr>`;
   }).join('');
+  const pilihan=(APP.cache.pekerja||[]).filter(p=>p.aktif || P.rows.some(r=>Number(r.pekerja_id)===Number(p.id)));
+  const atur=(UPAH.atur && adm)? `<div class="border rounded p-2 mb-2">
+      <div class="small fw-semibold mb-1">Pekerja di periode ini:</div>
+      ${pilihan.length? `<div class="d-flex flex-wrap gap-3">${pilihan.map(p=>`<label class="form-check small mb-0"><input class="form-check-input" type="checkbox"
+          ${P.rows.some(r=>Number(r.pekerja_id)===Number(p.id))?'checked':''} onchange="upahAturPekerja(${p.id},this.checked)"> ${esc(p.nama)} <span class="text-muted">(${esc(p.jabatan||'-')})</span></label>`).join('')}</div>`
+        : '<div class="small text-muted">Belum ada data pekerja aktif. Tambahkan di Master Data → Data Pekerja.</div>'}
+    </div>` : '';
   el.innerHTML=`<div class="card mb-2"><div class="card-body">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+      <div><div class="fw-bold">${teksPeriode(P)}</div>
+        <div class="small text-muted">${tg.length} hari · ${pendekPeriode(P)} · Libur: ${P.hari_libur.length? URUT_LIBUR.filter(d=>P.hari_libur.includes(d)).map(d=>HARI_NM[d]).join(', ') : 'tidak ada'}</div></div>
+      ${adm? `<div class="d-flex gap-1 flex-wrap">
+        <button class="btn btn-sm btn-outline-secondary" onclick="modalPeriode('ubah')"><i class="bi bi-calendar-range me-1"></i>Ubah periode</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="modalPeriode('salin')"><i class="bi bi-copy me-1"></i>Salin periode ke pekerjaan lain</button>
+        <button class="btn btn-sm btn-outline-danger" onclick="hapusPeriode()" title="Hapus periode"><i class="bi bi-trash"></i></button></div>`:''}
+    </div>
     <div class="row g-2 align-items-end mb-2">
-      <div class="col-md-5"><label class="form-label small fw-semibold mb-1">Pekerjaan RAB</label><input class="form-control form-control-sm" value="${esc(namaPek(L.pekerjaan_id))}" disabled></div>
-      <div class="col-md-4"><label class="form-label small fw-semibold mb-1">Uraian pekerjaan</label><input class="form-control form-control-sm" value="${esc(L.uraian)}" ${ro} placeholder="mis. Pasangan dinding dan plesteran" oninput="upahSet('uraian',this.value)"></div>
-      <div class="col-md-3"><label class="form-label small fw-semibold mb-1">Tgl Dibayar</label><input type="date" class="form-control form-control-sm" value="${L.tgl_bayar||''}" ${ro} onchange="upahSet('tgl_bayar',this.value||null)"></div>
+      <div class="col-md-8"><label class="form-label small fw-semibold mb-1">Uraian pekerjaan</label><input class="form-control form-control-sm" value="${esc(P.uraian)}" ${ro} placeholder="mis. Pasangan dinding dan plesteran" oninput="upahSet('uraian',this.value)"></div>
+      <div class="col-md-4"><label class="form-label small fw-semibold mb-1">Tgl Dibayar</label><input type="date" class="form-control form-control-sm" value="${P.tgl_bayar||''}" ${ro} onchange="upahSet('tgl_bayar',this.value||null)"></div>
     </div>
     ${atur}
-    ${L.rows.length? `<div class="table-responsive"><table class="table table-sm align-middle mb-0 text-center">
+    ${pesanBentrok.length? `<div class="alert alert-danger small py-2"><i class="bi bi-exclamation-triangle me-1"></i><b>Kemungkinan dobel bayar:</b><br>${pesanBentrok.join('<br>')}<div class="mt-1" style="font-size:.75rem">Kotak bergaris merah = bentrok. Tetap bisa disimpan bila memang benar (mis. setengah hari di masing-masing pekerjaan).</div></div>`:''}
+    ${P.rows.length? `<div class="table-responsive"><table class="table table-sm align-middle mb-0 text-center">
       <thead><tr><th class="text-start ps-2">Nama</th><th class="text-start">Jabatan</th>
-        ${tg.map((t,d)=>`<th class="${d===6?'bg-light':''}">${NAMA_HARI[d].slice(0,3)}<br><span class="fw-normal">${t.slice(8,10)}/${t.slice(5,7)}</span></th>`).join('')}
+        ${tg.map(t=>`<th class="${isLibur(P,t)?'libur':''}">${HARI_3[tglD(t).getDay()]}<br><span class="fw-normal">${ddmm(t)}</span></th>`).join('')}
         <th>Hari</th><th class="text-end">Upah/Hari</th><th class="text-end pe-2">Jumlah</th></tr></thead>
       <tbody>${grid}</tbody>
-      <tfoot><tr class="fw-bold"><td colspan="9" class="text-end">TOTAL</td><td>${fmtHari(totH)}</td><td></td><td class="text-end pe-2">${rp(tot)}</td></tr></tfoot>
+      <tfoot><tr class="fw-bold"><td colspan="${2+tg.length}" class="text-end">TOTAL</td><td>${fmtHari(totH)}</td><td></td><td class="text-end pe-2">${rp(tot)}</td></tr></tfoot>
     </table></div>`
-    : `<div class="alert alert-light border text-center small mb-0"><i class="bi bi-person-dash me-1"></i>Pekan ini belum ada pekerja di pekerjaan ini.${adm?' Klik <b>Atur pekerja</b> untuk menambahkan.':''}</div>`}
+    : `<div class="alert alert-light border text-center small mb-0"><i class="bi bi-person-dash me-1"></i>Belum ada pekerja di periode ini.${adm?' Klik <b>Atur pekerja</b>.':''}</div>`}
     <div class="d-flex justify-content-between align-items-center mt-2 flex-wrap gap-2">
-      <div class="text-muted" style="font-size:.78rem">${adm?'Klik kotak: 1 hadir → ½ setengah hari → kosong. ':''}${L.transaksi_id?'<i class="bi bi-link-45deg"></i> Sudah tercatat sebagai transaksi pengeluaran (BKU, Kas Tunai &amp; Realisasi RAB).':'Saat disimpan, total upah dicatat sebagai 1 transaksi pengeluaran.'}</div>
+      <div class="text-muted" style="font-size:.78rem">${adm?'Klik kotak: 1 hadir → ½ setengah hari → kosong. Kolom libur tidak bisa diisi. ':''}${P.transaksi_id?'<i class="bi bi-link-45deg"></i> Sudah tercatat sebagai transaksi pengeluaran (BKU, Kas Tunai &amp; Realisasi RAB).':'Saat disimpan, total upah dicatat sebagai 1 transaksi pengeluaran.'}</div>
       ${adm? `<div class="d-flex gap-1 flex-wrap">
-        <button class="btn btn-sm btn-outline-secondary" onclick="upahHadirSemua()" ${L.rows.length?'':'disabled'}><i class="bi bi-check2-all me-1"></i>Hadir semua Sen–Sab</button>
-        <button class="btn btn-sm btn-outline-secondary" onclick="UPAH.atur=!UPAH.atur;renderLembarUpah()"><i class="bi bi-person-plus me-1"></i>Atur pekerja</button>
-        <button class="btn btn-sm btn-brand" id="up-simpan" onclick="simpanUpah()" title="Menyimpan semua tab pekan ini yang berubah"><i class="bi bi-save me-1"></i>Simpan</button></div>` : ''}
+        <button class="btn btn-sm btn-outline-secondary" onclick="upahHadirSemua()" ${P.rows.length?'':'disabled'}><i class="bi bi-check2-all me-1"></i>Hadir semua (kecuali libur)</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="UPAH.atur=!UPAH.atur;renderEditorUpah()"><i class="bi bi-person-plus me-1"></i>Atur pekerja</button>
+        <button class="btn btn-sm btn-brand" id="up-simpan" onclick="simpanUpah()" title="Menyimpan semua periode yang berubah (bertanda ●)"><i class="bi bi-save me-1"></i>Simpan</button></div>`:''}
     </div>
   </div></div>
-  <div class="d-flex gap-1 flex-wrap">
-    <button class="btn btn-sm btn-outline-primary" onclick="cetakUpah('hadir',false)" ${L.rows.length?'':'disabled'}><i class="bi bi-printer me-1"></i>Cetak Daftar Hadir</button>
-    <button class="btn btn-sm btn-outline-primary" onclick="cetakUpah('terima',false)" ${L.rows.length?'':'disabled'}><i class="bi bi-printer me-1"></i>Cetak Tanda Terima</button>
+  <div class="d-flex gap-1 flex-wrap align-items-center">
+    <button class="btn btn-sm btn-outline-primary" onclick="cetakUpah('hadir',false)" ${P.rows.length?'':'disabled'}><i class="bi bi-printer me-1"></i>Cetak Daftar Hadir</button>
+    <button class="btn btn-sm btn-outline-primary" onclick="cetakUpah('terima',false)" ${P.rows.length?'':'disabled'}><i class="bi bi-printer me-1"></i>Cetak Tanda Terima</button>
+    <span class="text-muted small ms-1">Semua pekerjaan dengan periode sama:</span>
+    <button class="btn btn-sm btn-outline-secondary" onclick="cetakUpah('hadir',true)"><i class="bi bi-files me-1"></i>Daftar Hadir</button>
+    <button class="btn btn-sm btn-outline-secondary" onclick="cetakUpah('terima',true)"><i class="bi bi-files me-1"></i>Tanda Terima</button>
   </div>
   <div class="text-muted mt-2" style="font-size:.78rem">Saat mencetak: Daftar Hadir pilih <b>Tata Letak: Lanskap</b>; Tanda Terima pilih <b>Potret</b>.</div>`;
 }
 
-function upahPilihTab(pid){ UPAH.aktif=pid; UPAH.atur=false; renderTabsUpah(); renderLembarUpah(); }
-function upahTandai(){ const L=lembarAktif(); if(L) L.dirty=true; renderTabsUpah(); }
-function upahSet(k,v){ if(!isAdmin()) return; const L=lembarAktif(); if(!L) return; L[k]=v; upahTandai(); }
-function upahToggle(i,d){
+function upahRefresh(){ renderTabsUpah(); renderDaftarPeriode(); renderEditorUpah(); }
+function upahPilihPek(pid){ UPAH.pekAktif=pid; UPAH.atur=false; const ps=periodePek(pid); UPAH.perAktif=ps[0]? ps[0].id : null; upahRefresh(); }
+function upahPilihPeriode(id){ UPAH.perAktif=id; UPAH.atur=false; upahRefresh(); }
+function upahTandai(){ const P=periodeAktif(); if(P) P.dirty=true; renderTabsUpah(); renderDaftarPeriode(); }
+function upahSet(k,v){ if(!isAdmin()) return; const P=periodeAktif(); if(!P) return; P[k]=v; upahTandai(); }
+function upahToggle(i,t){
   if(!isAdmin()) return;
-  const r=lembarAktif().rows[i]; if(!r) return;
-  const v=r.hari[d]; r.hari[d]= v>=1? 0.5 : v>0? 0 : 1;
-  upahTandai(); renderLembarUpah();
+  const P=periodeAktif(), r=P&&P.rows[i]; if(!r || isLibur(P,t)) return;
+  const v=r.hari[t]||0; r.hari[t]= v>=1? 0.5 : v>0? 0 : 1;
+  upahTandai(); renderEditorUpah();
 }
 function upahHadirSemua(){
   if(!isAdmin()) return;
-  lembarAktif().rows.forEach(r=>{ for(let d=0; d<6; d++) r.hari[d]=1; });
-  upahTandai(); renderLembarUpah();
+  const P=periodeAktif(); if(!P) return;
+  P.rows.forEach(r=>tanggalPeriode(P).forEach(t=>{ if(!isLibur(P,t)) r.hari[t]=1; }));
+  upahTandai(); renderEditorUpah();
 }
 function upahAturPekerja(pid,on){
   if(!isAdmin()) return;
-  const L=lembarAktif(), ada=L.rows.findIndex(r=>Number(r.pekerja_id)===Number(pid));
+  const P=periodeAktif(); if(!P) return;
+  const ada=P.rows.findIndex(r=>Number(r.pekerja_id)===Number(pid));
   if(on && ada<0){
-    L.rows.push({ pekerja_id:pid, upah_harian:Number(pekerjaById(pid).upah_harian)||0, hari:[0,0,0,0,0,0,0] });
-    sortRows(L);
+    const hari={}; tanggalPeriode(P).forEach(t=>hari[t]=0);
+    P.rows.push({ pekerja_id:pid, upah_harian:Number(pekerjaById(pid).upah_harian)||0, hari });
+    sortRows(P);
   }else if(!on && ada>=0){
-    if(jmlHariRow(L.rows[ada])>0 && !confirm('Pekerja ini sudah punya data hadir di pekan ini. Keluarkan dari lembar?')){ renderLembarUpah(); return; }
-    L.rows.splice(ada,1);
+    if(jmlHariRow(P.rows[ada])>0 && !confirm('Pekerja ini sudah punya data hadir di periode ini. Keluarkan?')){ renderEditorUpah(); return; }
+    P.rows.splice(ada,1);
   }
-  upahTandai(); renderLembarUpah();
+  upahTandai(); renderEditorUpah();
+}
+
+// ----- modal periode: baru / ubah / salin -----
+let MODAL_UPAH='baru';
+function modalPeriode(mode){
+  if(!isAdmin()) return;
+  MODAL_UPAH=mode;
+  const P=periodeAktif(), last=periodePek(UPAH.pekAktif)[0];
+  let mulai, selesai, libur;
+  if(mode==='baru'){
+    mulai = last? tambahHari(last.tgl_selesai,1) : isoLokal(new Date());
+    selesai = tambahHari(mulai, MAKS_HARI-1);
+    libur = last? [...last.hari_libur] : [5];
+  }else{ if(!P) return; mulai=P.tgl_mulai; selesai=P.tgl_selesai; libur=[...P.hari_libur]; }
+  const kunci = mode==='salin'? 'disabled' : '';
+  const daftarPek = pekerjaanHarian().filter(p=> !(mode==='salin' && Number(p.id)===Number(UPAH.pekAktif)));
+  const body=`
+    <div class="row g-2">
+      <div class="col-6"><label class="form-label small fw-semibold mb-1">Tanggal mulai</label><input type="date" class="form-control" id="pm-mulai" value="${mulai}" ${kunci} oninput="upahCekModal()"></div>
+      <div class="col-6"><label class="form-label small fw-semibold mb-1">Tanggal selesai</label><input type="date" class="form-control" id="pm-selesai" value="${selesai}" ${kunci} oninput="upahCekModal()"></div>
+    </div>
+    <div class="small text-muted mt-1" id="pm-info"></div>
+    <label class="form-label small fw-semibold mt-3 mb-1">Hari libur</label>
+    <div class="d-flex flex-wrap gap-2">${URUT_LIBUR.map(d=>`<label class="form-check form-check-inline small mb-0"><input class="form-check-input pm-lib" type="checkbox" value="${d}" ${libur.includes(d)?'checked':''} ${kunci} onchange="upahCekModal()"> ${HARI_NM[d]}</label>`).join('')}</div>
+    ${mode==='ubah'? '<div class="small text-muted mt-2">Isian hadir di luar rentang baru atau di hari libur akan dihapus.</div>' : `
+      <label class="form-label small fw-semibold mt-3 mb-1">${mode==='salin'?'Salin ke pekerjaan':'Buat periode ini untuk pekerjaan'}</label>
+      ${daftarPek.map(p=>`<div class="form-check"><input class="form-check-input pm-pek" type="checkbox" value="${p.id}" id="pmp-${p.id}" ${(mode==='baru' && Number(p.id)===Number(UPAH.pekAktif))?'checked':''} onchange="upahCekModal()">
+        <label class="form-check-label small" for="pmp-${p.id}">${esc(p.nama)}${Number(p.id)===Number(UPAH.pekAktif)?' <span class="text-muted">(tab ini)</span>':''}</label></div>`).join('')}
+      <div class="d-flex gap-3 mt-1"><button type="button" class="btn btn-link btn-sm p-0" onclick="document.querySelectorAll('.pm-pek').forEach(c=>c.checked=true);upahCekModal()">Centang semua</button>
+        ${mode==='baru'?`<button type="button" class="btn btn-link btn-sm p-0" onclick="document.querySelectorAll('.pm-pek').forEach(c=>c.checked=Number(c.value)===Number(UPAH.pekAktif));upahCekModal()">Hanya tab ini</button>`:''}</div>`}
+    <div id="pm-warn" class="mt-2"></div>`;
+  const judul = mode==='baru'? 'Periode Baru' : mode==='ubah'? 'Ubah Periode' : 'Salin Periode ke Pekerjaan Lain';
+  showModal(judul, body, ()=>simpanModalPeriode());
+  upahCekModal();
+}
+function upahNilaiModal(){
+  return { mulai:document.getElementById('pm-mulai').value, selesai:document.getElementById('pm-selesai').value,
+    libur:[...document.querySelectorAll('.pm-lib:checked')].map(c=>Number(c.value)),
+    target: MODAL_UPAH==='ubah'? [Number(UPAH.pekAktif)] : [...document.querySelectorAll('.pm-pek:checked')].map(c=>Number(c.value)) };
+}
+function upahCekModal(){
+  const {mulai, selesai, target}=upahNilaiModal();
+  const info=document.getElementById('pm-info'), warn=document.getElementById('pm-warn'), btn=document.getElementById('modalSave');
+  const err=[];
+  if(!mulai||!selesai) err.push('Isi tanggal mulai dan tanggal selesai.');
+  else{
+    const n=selisihHari(mulai,selesai)+1;
+    if(n<1) err.push('Tanggal selesai tidak boleh sebelum tanggal mulai.');
+    else if(n>MAKS_HARI) err.push(`Rentang ${n} hari — maksimal ${MAKS_HARI} hari.`);
+    if(info) info.innerHTML = (n>=1 && n<=MAKS_HARI)? `${n} hari: ${HARI_NM[tglD(mulai).getDay()]} ${fmtTgl(mulai)} s/d ${HARI_NM[tglD(selesai).getDay()]} ${fmtTgl(selesai)}` : '';
+  }
+  if(MODAL_UPAH!=='ubah' && !target.length) err.push('Pilih minimal 1 pekerjaan.');
+  if(!err.length){
+    target.forEach(pid=>{
+      UPAH.periode.filter(Q=>Number(Q.pekerjaan_id)===pid && !(MODAL_UPAH==='ubah' && Q.id===UPAH.perAktif)).forEach(Q=>{
+        if(tumpang(mulai,selesai,Q.tgl_mulai,Q.tgl_selesai)) err.push(`<b>${esc(namaPek(pid))}</b> sudah punya periode ${teksPeriode(Q)} yang bertabrakan.`);
+      });
+    });
+  }
+  if(warn) warn.innerHTML = err.length? `<div class="alert alert-danger small py-2 mb-0">${err.join('<br>')}</div>`
+    : (target.length>1? `<div class="alert alert-info small py-2 mb-0">Periode yang sama akan dibuat untuk ${target.length} pekerjaan. Setelah itu masing-masing berdiri sendiri (pekerja, tgl dibayar, transaksi).</div>` : '');
+  if(btn) btn.disabled=!!err.length;
+  return !err.length;
+}
+async function simpanModalPeriode(){
+  if(!upahCekModal()) return false;
+  const {mulai, selesai, libur, target}=upahNilaiModal();
+  if(MODAL_UPAH==='ubah'){
+    const P=periodeAktif(); if(!P) return false;
+    P.tgl_mulai=mulai; P.tgl_selesai=selesai; P.hari_libur=libur;
+    P.rows.forEach(r=>{ const lama=r.hari; r.hari={}; tanggalPeriode(P).forEach(t=>r.hari[t]= isLibur(P,t)? 0 : (lama[t]||0)); });
+    if(!(await simpanSatuPeriode(P))) return false;
+    await loadAll(); await muatUpah(); gambarUpah(); toast('Periode diubah.'); return true;
+  }
+  const rows=target.map(pid=>({ pekerjaan_id:pid, tgl_mulai:mulai, tgl_selesai:selesai, hari_libur:libur }));
+  const {data, error}=await sb.from('upah_lembar').insert(rows).select();
+  if(error){ toast('Gagal membuat periode: '+error.message,'danger'); return false; }
+  const baru=(data||[]).find(d=>Number(d.pekerjaan_id)===Number(UPAH.pekAktif));
+  // isian yang belum disimpan tetap dipertahankan
+  const simpanan=UPAH.periode.filter(P=>P.dirty);
+  await muatUpah();
+  simpanan.forEach(S=>{ const i=UPAH.periode.findIndex(P=>P.id===S.id); if(i>=0) UPAH.periode[i]=S; });
+  if(baru) UPAH.perAktif=baru.id;
+  gambarUpah(); toast(`Periode dibuat untuk ${target.length} pekerjaan.`); return true;
+}
+
+async function hapusPeriode(){
+  if(!isAdmin()) return;
+  const P=periodeAktif(); if(!P) return;
+  if(!confirm(`Hapus periode ${teksPeriode(P)} (${namaPek(P.pekerjaan_id)}) beserta kehadiran${P.transaksi_id?' dan transaksi upahnya':''}?`)) return;
+  if(P.transaksi_id){
+    const {error}=await sb.from('transaksi').delete().eq('id',P.transaksi_id);
+    if(error){ toast('Gagal hapus transaksi upah: '+error.message,'danger'); return; }
+  }
+  const {error}=await sb.from('upah_lembar').delete().eq('id',P.id);
+  if(error){ toast('Gagal hapus periode: '+error.message,'danger'); return; }
+  UPAH.periode=UPAH.periode.filter(Q=>Q.id!==P.id);
+  const ps=periodePek(UPAH.pekAktif); UPAH.perAktif=ps[0]? ps[0].id : null;
+  await loadAll(); gambarUpah(); toast('Periode dihapus.');
 }
 
 function kategoriUpah(){
@@ -2004,80 +2142,62 @@ function kategoriUpah(){
   return pilih? pilih.id : null;
 }
 
-// simpan semua lembar pekan ini yang berubah
+// ----- simpan semua periode yang berubah -----
 async function simpanUpah(){
   if(!isAdmin()) return;
-  const daftar=Object.values(UPAH.lembar).filter(L=>L.dirty);
+  const daftar=UPAH.periode.filter(P=>P.dirty);
   if(!daftar.length){ toast('Tidak ada perubahan untuk disimpan.','info'); return; }
-  for(const L of daftar){
-    if(L.rows.some(r=>jmlHariRow(r)>0) && !L.tgl_bayar){
-      UPAH.aktif=L.pekerjaan_id; renderTabsUpah(); renderLembarUpah();
-      toast(`Isi Tgl Dibayar untuk "${esc(namaPek(L.pekerjaan_id))}".`,'danger'); return;
+  for(const P of daftar){
+    if(P.rows.some(r=>jmlHariRow(r)>0) && !P.tgl_bayar){
+      UPAH.pekAktif=P.pekerjaan_id; UPAH.perAktif=P.id; upahRefresh();
+      toast(`Isi Tgl Dibayar untuk periode ${teksPeriode(P)} (${esc(namaPek(P.pekerjaan_id))}).`,'danger'); return;
     }
   }
   const btn=document.getElementById('up-simpan'); if(btn) btn.disabled=true;
   let gagal=0;
-  for(const L of daftar){ if(!(await simpanSatuLembar(L))) gagal++; }
+  for(const P of daftar){ if(!(await simpanSatuPeriode(P))) gagal++; }
   await loadAll();
-  if(!gagal){ await muatPekan(UPAH.mulai); toast('Upah Harian disimpan.'); }
-  else toast(`${gagal} lembar tidak tersimpan. Periksa lalu klik Simpan lagi.`,'danger');
+  if(!gagal){ await muatUpah(); toast('Upah Harian disimpan.'); }
+  else toast(`${gagal} periode tidak tersimpan. Periksa lalu klik Simpan lagi.`,'danger');
   gambarUpah();
 }
 
-async function simpanSatuLembar(L){
-  const nama=namaPek(L.pekerjaan_id);
-  // lembar dikosongkan: hapus lembar & transaksinya
-  if(!L.rows.length){
-    if(L.id){
-      if(!confirm(`Lembar "${nama}" pekan ini kosong. Hapus lembar beserta transaksi upahnya?`)) return false;
-      if(L.transaksi_id){
-        const {error}=await sb.from('transaksi').delete().eq('id',L.transaksi_id);
-        if(error){ toast('Gagal hapus transaksi upah: '+error.message,'danger'); return false; }
-      }
-      const {error}=await sb.from('upah_lembar').delete().eq('id',L.id);
-      if(error){ toast('Gagal hapus lembar: '+error.message,'danger'); return false; }
-    }
-    L.dirty=false; return true;
-  }
-  const head={ pekan_mulai:UPAH.mulai, pekerjaan_id:L.pekerjaan_id, uraian:(L.uraian||'').trim()||null, tgl_bayar:L.tgl_bayar||null };
-  let lid=L.id;
-  if(lid){
-    const {error}=await sb.from('upah_lembar').update(head).eq('id',lid);
-    if(error){ toast(`Gagal simpan "${nama}": `+error.message,'danger'); return false; }
-  }else{
-    const {data,error}=await sb.from('upah_lembar').insert(head).select().single();
-    if(error){ toast(`Gagal simpan "${nama}": `+error.message,'danger'); return false; }
-    lid=data.id; L.id=lid;
-  }
+async function simpanSatuPeriode(P){
+  const nama=namaPek(P.pekerjaan_id);
+  const head={ tgl_mulai:P.tgl_mulai, tgl_selesai:P.tgl_selesai, hari_libur:P.hari_libur, uraian:(P.uraian||'').trim()||null, tgl_bayar:P.tgl_bayar||null };
+  const {error}=await sb.from('upah_lembar').update(head).eq('id',P.id);
+  if(error){ toast(`Gagal simpan periode "${nama}": `+error.message,'danger'); return false; }
   // kehadiran: simpan yang baru dulu, baru hapus yang lama (data lama aman bila gagal)
-  const {data:lama, error:eL}=await sb.from('upah_hadir').select('id').eq('lembar_id',lid);
+  const {data:lama, error:eL}=await sb.from('upah_hadir').select('id').eq('lembar_id',P.id);
   if(eL){ toast('Gagal baca kehadiran lama: '+eL.message,'danger'); return false; }
-  const rows=L.rows.map((r,i)=>({ lembar_id:lid, pekerja_id:r.pekerja_id, upah_harian:Number(r.upah_harian)||0, hari:r.hari.map(x=>Number(x)||0), urutan:i }));
-  const {error:e2}=await sb.from('upah_hadir').insert(rows);
-  if(e2){ toast(`Kehadiran "${nama}" gagal disimpan: `+e2.message,'danger'); return false; }
+  if(P.rows.length){
+    const rows=P.rows.map((r,i)=>({ lembar_id:P.id, pekerja_id:r.pekerja_id, upah_harian:Number(r.upah_harian)||0, hari:r.hari, urutan:i }));
+    const {error:e2}=await sb.from('upah_hadir').insert(rows);
+    if(e2){ toast(`Kehadiran "${nama}" gagal disimpan: `+e2.message,'danger'); return false; }
+  }
   const oldIds=(lama||[]).map(x=>x.id);
   if(oldIds.length) await sb.from('upah_hadir').delete().in('id',oldIds);
-  if(!(await sinkronTransaksiUpah(L,lid))) return false;
-  L.dirty=false; return true;
+  if(!(await sinkronTransaksiUpah(P))) return false;
+  P.dirty=false; return true;
 }
 
-// total upah lembar = 1 transaksi pengeluaran (item per pekerja, satuan OH)
-async function sinkronTransaksiUpah(L,lid){
-  const nama=namaPek(L.pekerjaan_id);
-  const items=L.rows.filter(r=>jmlHariRow(r)>0).map((r,i)=>{ const p=pekerjaById(r.pekerja_id); return {
+// total upah periode = 1 transaksi pengeluaran (item per pekerja, satuan OH)
+async function sinkronTransaksiUpah(P){
+  const nama=namaPek(P.pekerjaan_id);
+  const items=P.rows.filter(r=>jmlHariRow(r)>0).map((r,i)=>{ const p=pekerjaById(r.pekerja_id); return {
     barang:`Upah ${p.jabatan||'Pekerja'} a.n. ${p.nama||''}`, banyaknya:jmlHariRow(r), satuan:'OH',
-    harga_satuan:Number(r.upah_harian)||0, urutan:i, pekerjaan_id:L.pekerjaan_id }; });
+    harga_satuan:Number(r.upah_harian)||0, urutan:i, pekerjaan_id:P.pekerjaan_id }; });
   if(!items.length){ // belum ada hari kerja: lepas transaksi lama bila ada
-    if(L.transaksi_id){
-      await sb.from('transaksi').delete().eq('id',L.transaksi_id);
-      await sb.from('upah_lembar').update({transaksi_id:null}).eq('id',lid);
-      L.transaksi_id=null;
+    if(P.transaksi_id){
+      await sb.from('transaksi').delete().eq('id',P.transaksi_id);
+      await sb.from('upah_lembar').update({transaksi_id:null}).eq('id',P.id);
+      P.transaksi_id=null;
     }
     return true;
   }
-  const head={ uraian:`Pembayaran upah tukang dan pekerja ${nama} Program Revitalisasi ${APP.sekolah?.nama_sekolah||''} periode ${teksPeriode()}`,
-    tgl_nota:L.tgl_bayar, tgl_kuitansi:L.tgl_bayar, tgl_lunas:L.tgl_bayar, tarif_pajak_persen:0, nilai_pajak:0 };
-  let tid=L.transaksi_id;
+  const head={ uraian:`Pembayaran upah tukang dan pekerja ${nama} Program Revitalisasi ${APP.sekolah?.nama_sekolah||''} periode ${teksPeriode(P)}`,
+    tgl_nota:P.tgl_bayar, tgl_kuitansi:P.tgl_bayar, tgl_lunas:P.tgl_bayar, tarif_pajak_persen:0, nilai_pajak:0 };
+  let tid=P.transaksi_id;
   if(tid){
     const {error}=await sb.from('transaksi').update(head).eq('id',tid);
     if(error){ toast('Gagal perbarui transaksi upah: '+error.message,'danger'); return false; }
@@ -2085,10 +2205,10 @@ async function sinkronTransaksiUpah(L,lid){
     const no=(APP.cache.transaksi.reduce((m,t)=>Math.max(m,Number(t.no_urut)||0),0)||0)+1;
     const {data,error}=await sb.from('transaksi').insert({ ...head, no_urut:no, kategori_id:kategoriUpah(), toko_id:null }).select().single();
     if(error){ toast('Gagal buat transaksi upah: '+error.message,'danger'); return false; }
-    tid=data.id; APP.cache.transaksi.push(data); // agar no urut lembar berikutnya tidak bentrok
-    const {error:eU}=await sb.from('upah_lembar').update({transaksi_id:tid}).eq('id',lid);
-    if(eU){ toast('Transaksi dibuat, tetapi tautan ke lembar gagal: '+eU.message,'danger'); }
-    L.transaksi_id=tid;
+    tid=data.id; APP.cache.transaksi.push(data); // agar no urut periode berikutnya tidak bentrok
+    const {error:eU}=await sb.from('upah_lembar').update({transaksi_id:tid}).eq('id',P.id);
+    if(eU) toast('Transaksi dibuat, tetapi tautan ke periode gagal: '+eU.message,'danger');
+    P.transaksi_id=tid;
   }
   const {data:lama}=await sb.from('transaksi_item').select('id').eq('transaksi_id',tid);
   const {error:eI}=await sb.from('transaksi_item').insert(items.map(it=>({ ...it, transaksi_id:tid })));
@@ -2098,56 +2218,58 @@ async function sinkronTransaksiUpah(L,lid){
   return true;
 }
 
-/* ----- cetak ----- */
+// ----- cetak -----
 function ttdUpah(s, kananAtas){
   return `<table style="width:100%;margin-top:16px"><tr>
     <td style="width:50%;text-align:left;vertical-align:top">Mengetahui/Menyetujui:<br>Ketua P2SP ${esc(s.nama_sekolah||'')}<div style="height:56px"></div><span class="nm">${esc(s.ketua_p2sp||'')}</span><br>${s.nip_ketua_p2sp?('NIP. '+esc(s.nip_ketua_p2sp)):''}</td>
     <td style="width:50%;text-align:left;vertical-align:top">${kananAtas}<br>Bendahara P2SP ${esc(s.nama_sekolah||'')}<div style="height:56px"></div><span class="nm">${esc(s.bendahara||'')}</span><br>NIP. ${esc(s.nip_bendahara||'')}</td>
   </tr></table>`;
 }
-function infoUpah(s,L){
+function infoUpah(s,P){
   return `<table class="info-list" style="margin-top:6px">
     ${infoRow('Kegiatan','Program Revitalisasi '+(s.nama_sekolah||''))}
-    ${infoRow('Pekerjaan',namaPek(L.pekerjaan_id),false,true)}
-    ${L.uraian? infoRow('Uraian',L.uraian) : ''}
+    ${infoRow('Pekerjaan',namaPek(P.pekerjaan_id),false,true)}
+    ${P.uraian? infoRow('Uraian',P.uraian) : ''}
   </table>`;
 }
-function docDaftarHadir(L){
-  const s=APP.sekolah||{}, tg=tglPekan();
-  let totH=0, akhir=-1;
-  L.rows.forEach(r=>r.hari.forEach((v,d)=>{ if(v>0 && d>akhir) akhir=d; }));
-  const tglTtd=tg[akhir>=0? akhir : 5];
-  const body=L.rows.map((r,n)=>{ const p=pekerjaById(r.pekerja_id), h=jmlHariRow(r); totH+=h;
+function docDaftarHadir(P){
+  const s=APP.sekolah||{}, tg=tanggalPeriode(P);
+  let totH=0, akhir=null;
+  P.rows.forEach(r=>tg.forEach(t=>{ if((r.hari[t]||0)>0 && (!akhir || t>akhir)) akhir=t; }));
+  const tglTtd = akhir || [...tg].reverse().find(t=>!isLibur(P,t)) || P.tgl_selesai;
+  const lebar=(64/tg.length).toFixed(1);
+  const body=P.rows.map((r,n)=>{ const p=pekerjaById(r.pekerja_id), h=jmlHariRow(r); totH+=h;
     return `<tr><td style="text-align:center">${n+1}</td><td>${esc(p.nama||'')}</td><td>${esc(p.jabatan||'')}</td>
-      ${r.hari.map(v=> v>0? `<td class="ttd-hari">${v<1?'<span class="ket">(½ hari)</span>':''}</td>` : `<td class="ttd-hari off">-</td>`).join('')}
+      ${tg.map(t=>{ if(isLibur(P,t)) return `<td class="ttd-hari lib">Libur</td>`;
+        const v=r.hari[t]||0; return v>0? `<td class="ttd-hari">${v<1?'<span class="ket">(½ hari)</span>':''}</td>` : `<td class="ttd-hari off">-</td>`; }).join('')}
       <td style="text-align:center">${fmtHari(h)}</td></tr>`; }).join('');
   return `<div class="doc doc-land">${kop(s)}
     <h3>DAFTAR HADIR TUKANG DAN PEKERJA</h3>
-    <div style="text-align:center">Periode ${teksPeriode()}</div>
-    ${infoUpah(s,L)}
+    <div style="text-align:center">Periode ${teksPeriode(P)}</div>
+    ${infoUpah(s,P)}
     <table class="items">
       <thead>
-        <tr><th rowspan="2" style="width:3.5%">No</th><th rowspan="2" style="width:16%">Nama</th><th rowspan="2" style="width:10%">Jabatan</th><th colspan="7">Tanda Tangan Kehadiran</th><th rowspan="2" style="width:6%">Jml Hari</th></tr>
-        <tr>${tg.map((t,d)=>`<th style="width:9%;font-size:9.5pt">${NAMA_HARI[d]}<br>${t.slice(8,10)}/${t.slice(5,7)}</th>`).join('')}</tr>
+        <tr><th rowspan="2" style="width:3.5%">No</th><th rowspan="2" style="width:17%">Nama</th><th rowspan="2" style="width:10%">Jabatan</th><th colspan="${tg.length}">Tanda Tangan Kehadiran</th><th rowspan="2" style="width:5.5%">Jml Hari</th></tr>
+        <tr>${tg.map(t=>`<th style="width:${lebar}%;font-size:9.5pt">${HARI_NM[tglD(t).getDay()]}<br>${ddmm(t)}</th>`).join('')}</tr>
       </thead>
       <tbody>${body}
-        <tr style="font-weight:bold"><td colspan="10" style="text-align:right">JUMLAH HARI ORANG KERJA</td><td style="text-align:center">${fmtHari(totH)}</td></tr>
+        <tr style="font-weight:bold"><td colspan="${3+tg.length}" style="text-align:right">JUMLAH HARI ORANG KERJA</td><td style="text-align:center">${fmtHari(totH)}</td></tr>
       </tbody>
     </table>
     ${ttdUpah(s, `${esc(s.kota_ttd||'Benteng')}, ${fmtTgl(tglTtd)}`)}
   </div>`;
 }
-function docTandaTerima(L){
+function docTandaTerima(P){
   const s=APP.sekolah||{};
   let totH=0, tot=0;
-  const body=L.rows.map((r,n)=>{ const p=pekerjaById(r.pekerja_id), h=jmlHariRow(r), j=h*(Number(r.upah_harian)||0); totH+=h; tot+=j;
+  const body=P.rows.map((r,n)=>{ const p=pekerjaById(r.pekerja_id), h=jmlHariRow(r), j=h*(Number(r.upah_harian)||0); totH+=h; tot+=j;
     return `<tr><td style="text-align:center">${n+1}</td><td>${esc(p.nama||'')}</td><td>${esc(p.jabatan||'')}</td><td style="text-align:center">${fmtHari(h)}</td>
       <td style="text-align:right">${num(r.upah_harian)}</td><td style="text-align:right">${num(j)}</td>
       <td class="ttd-zz">${(n+1)%2? `<span class="kiri">${n+1}. ........</span>` : `<span class="kanan">${n+1}. ........</span>`}</td></tr>`; }).join('');
   return `<div class="doc">${kop(s)}
     <h3>TANDA TERIMA PEMBAYARAN UPAH</h3>
-    <div style="text-align:center">Periode ${teksPeriode()}</div>
-    ${infoUpah(s,L)}
+    <div style="text-align:center">Periode ${teksPeriode(P)}</div>
+    ${infoUpah(s,P)}
     <p style="margin:8px 0;text-indent:28px">Yang bertanda tangan di bawah ini telah menerima pembayaran upah kerja dari Bendahara Banper Revitalisasi ${esc(s.nama_sekolah||'')} dengan rincian sebagai berikut:</p>
     <table class="items">
       <thead><tr><th style="width:5%">No</th><th>Nama</th><th style="width:14%">Jabatan</th><th style="width:8%">Jml Hari</th><th style="width:14%">Upah/Hari (Rp)</th><th style="width:15%">Jumlah (Rp)</th><th style="width:20%">Tanda Tangan</th></tr></thead>
@@ -2156,16 +2278,16 @@ function docTandaTerima(L){
       </tbody>
     </table>
     <p><i>Terbilang : ${terbilang(tot)}.</i></p>
-    ${ttdUpah(s, 'Lunas Bayar: '+fmtTgl(L.tgl_bayar))}
+    ${ttdUpah(s, 'Lunas Bayar: '+fmtTgl(P.tgl_bayar))}
   </div>`;
 }
 function cetakUpah(jenis, semua){
-  const daftar = semua
-    ? pekerjaanHarian().map(p=>getLembar(p.id)).filter(L=>L.rows.length)
-    : [lembarAktif()].filter(L=>L && L.rows.length);
+  const P=periodeAktif(); if(!P) return;
+  const daftar=(semua? UPAH.periode.filter(Q=>Q.tgl_mulai===P.tgl_mulai && Q.tgl_selesai===P.tgl_selesai) : [P])
+    .filter(Q=>Q.rows.length).sort((a,b)=>urutPek(a.pekerjaan_id)-urutPek(b.pekerjaan_id));
   if(!daftar.length){ toast('Tidak ada pekerja untuk dicetak.','danger'); return; }
-  if(adaDirty()) toast('Catatan: ada isian belum disimpan — yang dicetak sesuai isian di layar.','warning');
-  document.getElementById('printArea').innerHTML = daftar.map(L=> jenis==='hadir'? docDaftarHadir(L) : docTandaTerima(L)).join('');
+  if(daftar.some(Q=>Q.dirty)) toast('Catatan: ada isian belum disimpan — yang dicetak sesuai isian di layar.','warning');
+  document.getElementById('printArea').innerHTML = daftar.map(Q=> jenis==='hadir'? docDaftarHadir(Q) : docTandaTerima(Q)).join('');
   document.body.classList.remove('print-bku');
   setTimeout(()=>window.print(), 300);
 }
