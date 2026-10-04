@@ -824,6 +824,15 @@ async function hitungSaldo(){
   return { totMasuk, totTarik, totBelanja, saldoBank, saldoTunai, saldoBKU };
 }
 
+// urutan buku: tanggal → kelompok (masuk dulu, lalu keluar) → No. Bukti (001, 002, …)
+function urutBuku(a,b){
+  if(!a.tanggal && !b.tanggal) return 0;
+  if(!a.tanggal) return 1; if(!b.tanggal) return -1;
+  if(a.tanggal!==b.tanggal) return a.tanggal<b.tanggal? -1 : 1;
+  if((a._g||0)!==(b._g||0)) return (a._g||0)-(b._g||0);
+  return String(a.no_bukti||'').localeCompare(String(b.no_bukti||''),'id',{numeric:true});
+}
+
 async function bkuRows(){
   const pen = (APP.cache.penerimaan||[]).map(p=>({
     tipe:'in', tanggal:p.tanggal, uraian:p.uraian, no_bukti:p.no_bukti, jumlah:Number(p.jumlah)||0, link:p.link_bukti
@@ -834,10 +843,7 @@ async function bkuRows(){
   const out = (APP.cache.transaksi||[]).map(t=>({
     tipe:'out', tanggal:t.tgl_kuitansi||t.tgl_nota, uraian:t.uraian, no_bukti:t.no_bukti, jumlah:totByTrx[t.id]||0, link:t.link_bukti
   }));
-  const all = [...pen, ...out].sort((a,b)=>{
-    if(!a.tanggal) return 1; if(!b.tanggal) return -1;
-    return new Date(a.tanggal) - new Date(b.tanggal);
-  });
+  const all = [...pen.map(r=>({...r,_g:0})), ...out.map(r=>({...r,_g:1}))].sort(urutBuku);
   return all;
 }
 
@@ -981,7 +987,7 @@ async function cetakBKU(){
 function bankRows(){
   const masuk = (APP.cache.penerimaan||[]).map(p=>({tanggal:p.tanggal,no_bukti:p.no_bukti,uraian:p.uraian,in:Number(p.jumlah)||0,out:0}));
   const tarik = (APP.cache.penarikan||[]).map(p=>({tanggal:p.tanggal,no_bukti:p.no_bukti,uraian:p.uraian||'Penarikan ke kas tunai',in:0,out:Number(p.jumlah)||0}));
-  return [...masuk,...tarik].sort((a,b)=>{ if(!a.tanggal)return 1; if(!b.tanggal)return -1; return new Date(a.tanggal)-new Date(b.tanggal); });
+  return [...masuk.map(r=>({...r,_g:0})),...tarik.map(r=>({...r,_g:1}))].sort(urutBuku);
 }
 // baris tunai: penerimaan (penarikan) & pengeluaran (belanja/transaksi)
 async function tunaiRows(){
@@ -990,7 +996,7 @@ async function tunaiRows(){
   const totByTrx = {};
   (items||[]).forEach(i=>{ totByTrx[i.transaksi_id]=(totByTrx[i.transaksi_id]||0)+(Number(i.jumlah)||0); });
   const belanja = (APP.cache.transaksi||[]).map(t=>({tanggal:t.tgl_kuitansi||t.tgl_nota,no_bukti:t.no_bukti,uraian:t.uraian,in:0,out:totByTrx[t.id]||0}));
-  return [...tarik,...belanja].sort((a,b)=>{ if(!a.tanggal)return 1; if(!b.tanggal)return -1; return new Date(a.tanggal)-new Date(b.tanggal); });
+  return [...tarik.map(r=>({...r,_g:0})),...belanja.map(r=>({...r,_g:1}))].sort(urutBuku);
 }
 // baris pajak: dipungut (dari transaksi) & disetor (dari setor_pajak)
 function pajakRows(){
@@ -998,7 +1004,7 @@ function pajakRows(){
     tanggal:t.tgl_kuitansi||t.tgl_nota, no_bukti:t.no_bukti, uraian:'Pungut pajak: '+(t.uraian||''), in:Number(t.nilai_pajak)||0, out:0
   }));
   const setor = (APP.cache.setor_pajak||[]).map(p=>({tanggal:p.tanggal,no_bukti:p.no_bukti,uraian:p.uraian||'Setor pajak',in:0,out:Number(p.jumlah)||0}));
-  return [...pungut,...setor].sort((a,b)=>{ if(!a.tanggal)return 1; if(!b.tanggal)return -1; return new Date(a.tanggal)-new Date(b.tanggal); });
+  return [...pungut.map(r=>({...r,_g:0})),...setor.map(r=>({...r,_g:1}))].sort(urutBuku);
 }
 
 // render halaman buku pembantu generik (layar)
