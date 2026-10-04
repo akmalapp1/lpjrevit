@@ -304,9 +304,9 @@ async function loadAll(){
     sb.from('toko').select('*').order('nama_toko'),
     sb.from('format_nomor').select('*'),
     sb.from('transaksi').select('*, kategori(nama), toko(nama_toko,pimpinan,alamat,no_hp)').order('no_urut',{ascending:false}),
-    sb.from('penerimaan').select('*').order('tanggal'),
-    sb.from('penarikan').select('*').order('tanggal'),
-    sb.from('setor_pajak').select('*').order('tanggal'),
+    sb.from('penerimaan').select('*').order('tanggal').order('no_bukti').order('id'),
+    sb.from('penarikan').select('*').order('tanggal').order('no_bukti').order('id'),
+    sb.from('setor_pajak').select('*').order('tanggal').order('no_bukti').order('id'),
     sb.from('frasa_uraian').select('*').order('urutan').order('id'),
     sb.from('rab_pekerjaan').select('*').order('urutan').order('id'),
     sb.from('pekerja').select('*').order('nama'),    
@@ -736,13 +736,13 @@ function formSetor(id){
   const idsSetoranIni = (id && r.transaksi_ids)? r.transaksi_ids.split(',').map(Number) : [];
   const kandidat = (APP.cache.transaksi||[]).filter(t=>
     Number(t.nilai_pajak)>0 && (!t.pajak_disetor || idsSetoranIni.includes(t.id))
-  );
+  ).map(t=>({...t, tanggal:t.tgl_kuitansi||t.tgl_nota})).sort(urutBuku);
   const listHtml = kandidat.length? kandidat.map(t=>`
     <div class="form-check">
       <input class="form-check-input trx-pajak" type="checkbox" value="${t.id}" data-nilai="${Number(t.nilai_pajak)||0}"
         id="cksp-${t.id}" ${idsSetoranIni.includes(t.id)?'checked':''} onchange="hitungSetorTotal()">
       <label class="form-check-label" for="cksp-${t.id}">
-        ${esc(t.uraian||'(tanpa uraian)')} — <b>${rp(t.nilai_pajak)}</b>
+        <span class="text-muted">${esc(t.no_bukti||pad3(t.no_urut))} · ${fmtTgl(t.tanggal)}</span> — ${esc(t.uraian||'(tanpa uraian)')} — <b>${rp(t.nilai_pajak)}</b>
       </label>
     </div>`).join('') : '<div class="text-muted small">Tidak ada pajak yang belum disetor.</div>';
   const body = `
